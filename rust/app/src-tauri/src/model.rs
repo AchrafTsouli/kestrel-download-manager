@@ -26,13 +26,14 @@ impl Status {
     }
 }
 
-/// What kind of transfer a download is; video and torrent details arrive in M4 and M5.
+/// What kind of transfer a download is.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum Kind {
     #[default]
     Http,
-    Video { selection: serde_json::Value },
+    /// A video page fetched with yt-dlp; the selection is the quality (and clip) chosen.
+    Video { selection: flux_media::Selection },
     Torrent { selection: serde_json::Value },
 }
 
@@ -118,8 +119,24 @@ pub struct View {
     pub completed_ms: Option<u64>,
     pub error: Option<String>,
     pub note: Option<String>,
+    /// Work after the transfer ("Joining video and audio"), with its progress when measurable.
+    pub phase: Option<String>,
+    pub phase_fraction: Option<f64>,
+    /// The size is the site's estimate (videos).
+    pub estimated: bool,
     pub exists: bool,
     pub speed_limit: u64,
+}
+
+/// What only a running transfer knows.
+#[derive(Debug, Clone, Default)]
+pub struct LiveInfo {
+    pub speed: f64,
+    pub connections: usize,
+    pub note: Option<String>,
+    pub phase: Option<String>,
+    pub phase_fraction: Option<f64>,
+    pub estimated: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -131,7 +148,7 @@ pub struct SegmentView {
 }
 
 impl View {
-    pub fn of(record: &Record, speed: f64, connections: usize, note: Option<String>) -> View {
+    pub fn of(record: &Record, live: &LiveInfo) -> View {
         let exists = record.status != Status::Completed || record.destination.exists();
         View {
             id: record.id.clone(),
@@ -146,15 +163,18 @@ impl View {
             kind: match record.kind { Kind::Http => "file", Kind::Video { .. } => "video", Kind::Torrent { .. } => "torrent" },
             written: record.written,
             total: record.total,
-            bytes_per_second: speed,
-            connections,
+            bytes_per_second: live.speed,
+            connections: live.connections,
             segments: record.resume.plan.segments.iter().map(|s| SegmentView { start: s.start, end: s.end, done: s.done }).collect(),
             resumable: record.resume.ranged,
             added_ms: record.added_ms,
             last_try_ms: record.last_try_ms,
             completed_ms: record.completed_ms,
             error: record.error.clone(),
-            note,
+            note: live.note.clone(),
+            phase: live.phase.clone(),
+            phase_fraction: live.phase_fraction,
+            estimated: live.estimated,
             exists,
             speed_limit: record.speed_limit,
         }

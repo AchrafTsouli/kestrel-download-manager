@@ -24,6 +24,9 @@ pub struct Pending {
     pub id: String,
     pub request: PendingRequest,
     pub probe: Option<Probe>,
+    /// What the video picker found (kept so the choice is checked against it).
+    #[serde(skip)]
+    pub video: Option<flux_media::Probe>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -35,6 +38,11 @@ pub struct PendingRequest {
     #[serde(skip_serializing)]
     pub session: Option<flux_engine::Session>,
     pub request_id: Option<String>,
+    /// A quality already chosen (in the browser's video panel or the picker).
+    pub video: Option<flux_media::Selection>,
+    /// Download the page itself, not its video.
+    #[serde(skip)]
+    pub as_file: bool,
 }
 
 #[derive(Default)]
@@ -75,6 +83,13 @@ pub fn open_complete(app: &AppHandle, id: &str) {
 fn open_start(app: &AppHandle, pending_id: &str) {
     open_window(app, &format!("start-{pending_id}"), "Download file info", 600.0, 340.0, false);
 }
+fn open_video(app: &AppHandle, pending_id: &str) {
+    open_window(app, &format!("video-{pending_id}"), "Download video", 640.0, 560.0, true);
+}
+fn pending_id() -> String {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    format!("{:x}{:x}", now_ms() ^ (std::process::id() as u64) << 20, NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed))
+}
 fn show_main(app: &AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.unminimize();
@@ -86,16 +101,30 @@ fn show_main(app: &AppHandle) {
 /// A link to add: either straight in, or through the start dialog when that is enabled.
 pub fn offer(app: &AppHandle, request: PendingRequest, force_dialog: bool) -> Result<Option<String>, String> {
     let manager = app.state::<Shared>().inner().clone();
+    // A video page without a chosen quality opens the quality list first.
+    if request.video.is_none() && !request.as_file && manager.media.available() && flux_media::pages::is_known_video_page(&request.url) {
+        let pending_id = pending_id();
+        app.state::<Windows>().pending.lock().unwrap().insert(pending_id.clone(), Pending { id: pending_id.clone(), request, probe: None, video: None });
+        open_video(app, &pending_id);
+        return Ok(None);
+    }
     let show_dialog = force_dialog || manager.settings.read().unwrap().show_start_dialog;
     if !show_dialog {
-        let id = manager.add(AddRequest { url: request.url, file_name: request.file_name, description: request.description, session: request.session, request_id: request.request_id, start: Some("now".into()), ..Default::default() })?;
+        let id = manager.add(AddRequest { url: request.url, file_name: request.file_name, description: request.description, session: request.session, request_id: request.request_id, video: request.video, start: Some("now".into()), ..Default::default() })?;
         if manager.settings.read().unwrap().show_progress_window {
             open_progress(app, &id);
         }
         return Ok(Some(id));
     }
-    let pending_id = format!("{:x}", now_ms() ^ (std::process::id() as u64) << 20);
-    app.state::<Windows>().pending.lock().unwrap().insert(pending_id.clone(), Pending { id: pending_id.clone(), request: request.clone(), probe: None });
+    let pending_id = pending_id();
+    if let Some(selection) = &request.video {
+        // Nothing to ask the server: the quality list already said what the file will be.
+        let probe = video_probe(&manager, &request, selection);
+        app.state::<Windows>().pending.lock().unwrap().insert(pending_id.clone(), Pending { id: pending_id.clone(), request, probe: Some(probe), video: None });
+        open_start(app, &pending_id);
+        return Ok(None);
+    }
+    app.state::<Windows>().pending.lock().unwrap().insert(pending_id.clone(), Pending { id: pending_id.clone(), request: request.clone(), probe: None, video: None });
     open_start(app, &pending_id);
     // Ask the server for the real name and size while the dialog opens.
     let app = app.clone();
@@ -107,6 +136,22 @@ pub fn offer(app: &AppHandle, request: PendingRequest, force_dialog: bool) -> Re
         let _ = app.emit("probe", (pending_id, probe));
     });
     Ok(None)
+}
+
+/// The start dialog's file information for a chosen video quality.
+fn video_probe(manager: &Manager, request: &PendingRequest, selection: &flux_media::Selection) -> Probe {
+    let category = if selection.audio_only { "Music" } else { "Video" };
+    let stem = request.file_name.as_deref().map(|n| std::path::Path::new(n).file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default()).filter(|s| !s.trim().is_empty()).unwrap_or_else(|| "Video".into());
+    Probe {
+        url: request.url.clone(),
+        file_name: flux_engine::sanitize_file_name(&format!("{stem}.{}", selection.extension)),
+        total: selection.total_bytes,
+        resumable: true,
+        content_type: None,
+        category: category.into(),
+        folder: manager.folder_for(category).to_string_lossy().into_owned(),
+        error: None,
+    }
 }
 
 // ---------------------------------------------------------------------- commands
@@ -169,6 +214,7 @@ async fn confirm_pending(app: AppHandle, manager: Mgr<'_>, windows: State<'_, Wi
         session: pending.request.session,
         request_id: pending.request.request_id,
         total: pending.probe.and_then(|p| p.total),
+        video: pending.request.video,
         ..Default::default()
     })?;
     windows.pending.lock().unwrap().remove(&choice.pending_id);
@@ -180,6 +226,121 @@ async fn confirm_pending(app: AppHandle, manager: Mgr<'_>, windows: State<'_, Wi
 #[tauri::command]
 fn cancel_pending(windows: State<'_, Windows>, id: String) {
     windows.pending.lock().unwrap().remove(&id);
+}
+
+/// The video picker's list: one video's qualities or a playlist's entries.
+#[tauri::command]
+async fn probe_video(manager: Mgr<'_>, windows: State<'_, Windows>, id: String) -> Result<flux_media::Probe, String> {
+    let request = windows.pending.lock().unwrap().get(&id).map(|p| p.request.clone()).ok_or("This download was already added or cancelled.")?;
+    let session = request.session.clone().filter(|s| url::Url::parse(&request.url).is_ok_and(|u| s.validate(&u).is_ok()));
+    let cancel = tokio_util::sync::CancellationToken::new();
+    let found = match tokio::time::timeout(std::time::Duration::from_secs(150), manager.media.probe(&request.url, session.as_ref(), &cancel)).await {
+        Ok(Ok(found)) => found,
+        Ok(Err(error)) => return Err(if error.is_empty() { "Cancelled.".into() } else { error }),
+        Err(_) => { cancel.cancel(); return Err("The video site did not answer in time.".into()); }
+    };
+    if let Some(pending) = windows.pending.lock().unwrap().get_mut(&id) {
+        pending.video = Some(found.clone());
+    }
+    Ok(found)
+}
+#[tauri::command]
+async fn video_exact_cut(manager: Mgr<'_>) -> Result<bool, String> {
+    Ok(manager.media.supports_exact_cut().await)
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct VideoChoice {
+    pending_id: String,
+    /// One video: the chosen quality from the list.
+    format_id: Option<String>,
+    clip_start: Option<f64>,
+    clip_end: Option<f64>,
+    #[serde(default)]
+    clip_exact: bool,
+    /// A playlist: the videos to fetch, a height limit (none = best) or audio only.
+    #[serde(default)]
+    entries: Vec<String>,
+    max_height: Option<u32>,
+    #[serde(default)]
+    audio_only: bool,
+    #[serde(default)]
+    subfolder: bool,
+    /// "now" or "later"
+    start: String,
+}
+fn clock_name(seconds: f64) -> String {
+    let s = seconds.max(0.0) as u64;
+    if s >= 3600 { format!("{}.{:02}.{:02}", s / 3600, s / 60 % 60, s % 60) } else { format!("{}.{:02}", s / 60, s % 60) }
+}
+#[tauri::command]
+async fn confirm_video(app: AppHandle, manager: Mgr<'_>, windows: State<'_, Windows>, choice: VideoChoice) -> Result<String, String> {
+    let pending = windows.pending.lock().unwrap().get(&choice.pending_id).cloned().ok_or("This download was already added or cancelled.")?;
+    let found = pending.video.clone().ok_or("The quality list is not ready yet.")?;
+    if let Some(playlist) = found.playlist {
+        let preset = flux_media::Selection::preset(choice.max_height, choice.audio_only);
+        let category = if choice.audio_only { "Music" } else { "Video" };
+        let mut folder = manager.folder_for(category);
+        if choice.subfolder {
+            folder = folder.join(flux_engine::sanitize_file_name(&playlist.title).trim_end_matches('.'));
+        }
+        let mut added = 0;
+        let mut last_error = None;
+        for entry in playlist.entries.iter().filter(|e| choice.entries.contains(&e.url)) {
+            let request = AddRequest {
+                url: entry.url.clone(),
+                file_name: Some(format!("{}.{}", entry.title, preset.extension)),
+                folder: Some(folder.to_string_lossy().into_owned()),
+                category: Some(category.into()),
+                description: Some(playlist.title.clone()),
+                start: Some(if choice.start == "now" { "queue".into() } else { "later".into() }),
+                video: Some(preset.clone()),
+                ..Default::default()
+            };
+            match manager.add(request) {
+                Ok(_) => added += 1,
+                Err(error) => last_error = Some(format!("{}: {error}", entry.title)),
+            }
+        }
+        windows.pending.lock().unwrap().remove(&choice.pending_id);
+        // Many videos at once go through the main queue rather than all starting together.
+        if choice.start == "now" && added > 0 {
+            manager.running_queues.lock().unwrap().insert(model::MAIN_QUEUE.into());
+            manager.schedule();
+        }
+        let _ = app.emit("message", format!("{}: added {added} of {} videos{}.", playlist.title, choice.entries.len(), if choice.start == "now" { "" } else { " for later" }));
+        return match (added, last_error) {
+            (0, Some(error)) => Err(error),
+            _ => Ok(String::new()),
+        };
+    }
+    let catalog = found.catalog.ok_or("No video qualities were found.")?;
+    let format_id = choice.format_id.ok_or("Choose a quality.")?;
+    let mut selection = catalog.formats.iter().find(|f| f.format_id == format_id).cloned().ok_or("This quality is no longer available. Reload the quality list.")?;
+    selection.clip_start = choice.clip_start.filter(|s| *s > 0.0);
+    selection.clip_end = choice.clip_end;
+    selection.clip_exact = choice.clip_exact && selection.is_clip();
+    selection.validate(&pending.request.url)?;
+    let part = if selection.is_clip() { format!(" (part {}-{})", clock_name(selection.clip_start.unwrap_or(0.0)), selection.clip_end.map_or("end".to_string(), clock_name)) } else { String::new() };
+    let name = flux_engine::sanitize_file_name(&format!("{}{part} ({}).{}", catalog.title, selection.quality(), selection.extension));
+    let mut request = pending.request.clone();
+    request.file_name = Some(name);
+    request.video = Some(selection);
+    if choice.start == "later" {
+        windows.pending.lock().unwrap().remove(&choice.pending_id);
+        return manager.add(AddRequest { url: request.url, file_name: request.file_name, session: request.session, request_id: request.request_id, video: request.video, start: Some("later".into()), ..Default::default() });
+    }
+    windows.pending.lock().unwrap().remove(&choice.pending_id);
+    Ok(offer(&app, request, false)?.unwrap_or_default())
+}
+/// The page is not a video after all: download the address as a file.
+#[tauri::command]
+async fn video_as_file(app: AppHandle, windows: State<'_, Windows>, id: String) -> Result<(), String> {
+    let pending = windows.pending.lock().unwrap().remove(&id).ok_or("This download was already added or cancelled.")?;
+    let mut request = pending.request;
+    request.as_file = true;
+    request.video = None;
+    offer(&app, request, true).map(|_| ())
 }
 #[tauri::command]
 fn add_downloads(manager: Mgr, urls: Vec<String>, start: String) -> Vec<Result<String, String>> {
@@ -415,6 +576,7 @@ pub fn run() {
             scheduler(handle.clone());
             clipboard_monitor(handle.clone());
             bridge::serve(handle.clone());
+            media::keep_tools_current(handle.clone());
             // The main window starts hidden; Flux started by Windows or the browser stays in the tray.
             if !std::env::args().any(|a| a == "--background") {
                 if let Some(window) = handle.get_webview_window("main") { let _ = window.show(); let _ = window.set_focus(); }
@@ -437,6 +599,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             list_downloads, get_download, get_settings, save_settings, offer_url, get_pending, confirm_pending, cancel_pending,
+            probe_video, video_exact_cut, confirm_video, video_as_file,
             add_downloads, pause_downloads, resume_downloads, pause_all, resume_all, remove_downloads, remove_completed,
             rename_download, redownload, set_speed_limit, set_queue, enqueue, start_queue, stop_queue, running_queues,
             open_file, show_in_folder, open_folder, show_progress, show_window, power_action, exit_app, app_version

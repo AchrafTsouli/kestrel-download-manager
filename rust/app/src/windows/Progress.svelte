@@ -40,16 +40,22 @@
       </div>
       <dl class="kv">
         <dt>Status</dt><dd class:bad={d.status === "Failed"}>{d.status === "Downloading" ? "Receiving data…" : d.status}{d.error && d.status !== "Downloading" ? ` · ${d.error}` : ""}</dd>
-        <dt>File size</dt><dd>{d.total != null ? size(d.total) : "Unknown"}</dd>
+        <dt>File size</dt><dd>{d.total != null ? (d.estimated ? "≈ " : "") + size(d.total) : "Unknown"}</dd>
         <dt>Downloaded</dt><dd>{size(d.written, "0 B")} ({percent(d).toFixed(2)}%)</dd>
         <dt>Transfer rate</dt><dd>{d.bytesPerSecond > 0 ? size(d.bytesPerSecond) + "/s" : "—"}</dd>
         <dt>Time left</dt><dd>{timeLeft(d)}</dd>
-        <dt>Resume capability</dt><dd class={d.resumable ? "good" : "warn"}>{d.total == null && !d.resumable ? "Unknown until the server answers" : d.resumable ? "Yes" : "No: this server does not allow resuming"}</dd>
+        <dt>Resume capability</dt>
+        {#if d.kind === "video"}<dd class="good">Yes: video parts are kept while paused</dd>
+        {:else}<dd class={d.resumable ? "good" : "warn"}>{d.total == null && !d.resumable ? "Unknown until the server answers" : d.resumable ? "Yes" : "No: this server does not allow resuming"}</dd>{/if}
       </dl>
       <div class="track" aria-label="Progress"><i style:width="{percent(d)}%"></i></div>
+      {#if d.phase}
+        <div class="phase"><span>{d.phase}…</span>{#if d.phaseFraction != null}<span class="muted">{Math.round(d.phaseFraction * 100)}%</span>{/if}</div>
+        <div class="track second" class:busy={d.phaseFraction == null} aria-label={d.phase}><i style:width="{(d.phaseFraction ?? 1) * 100}%"></i></div>
+      {/if}
       {#if d.note}<p class="note">{d.note}</p>{/if}
 
-      {#if details}
+      {#if details && d.kind !== "video"}
         <div class="map" aria-label="Parts of the file">
           {#each parts as p}<span class="part" style:left="{p.left}%" style:width="{p.width}%"><i style:width="{p.fill}%"></i></span>{/each}
         </div>
@@ -84,6 +90,9 @@
   .conns { border: 1px solid var(--line); border-radius: 4px; max-height: 130px; overflow: auto; font-variant-numeric: tabular-nums; }
   .conn { display: grid; grid-template-columns: 40px 110px 1fr; gap: 8px; padding: 3px 8px; border-bottom: 1px solid color-mix(in srgb, var(--line) 50%, transparent); }
   .conn.head { color: var(--muted); background: var(--chrome); position: sticky; top: 0; }
+  .phase { display: flex; justify-content: space-between; }
+  .second.busy i { opacity: 0.45; animation: pulse 1.2s ease-in-out infinite alternate; }
+  @keyframes pulse { to { opacity: 0.9; } }
   .num { width: 90px; flex: none !important; }
   .bytes { margin-left: auto; font-variant-numeric: tabular-nums; }
 </style>

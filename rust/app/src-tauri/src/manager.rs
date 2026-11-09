@@ -12,7 +12,7 @@ use tauri::{AppHandle, Emitter};
 use tokio_util::sync::CancellationToken;
 use url::Url;
 
-use crate::model::{Kind, MAIN_QUEUE, Record, Settings, Status, View, category_for};
+use crate::model::{Kind, LiveInfo, MAIN_QUEUE, Record, Settings, Status, View, category_for};
 
 pub fn now_ms() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
@@ -22,9 +22,7 @@ pub fn now_ms() -> u64 {
 struct Live {
     cancel: CancellationToken,
     limiter: Limiter,
-    speed: f64,
-    connections: usize,
-    note: Option<String>,
+    info: LiveInfo,
 }
 
 /// What a window or the browser asks to add.
@@ -43,6 +41,8 @@ pub struct AddRequest {
     pub request_id: Option<String>,
     pub expected_sha256: Option<String>,
     pub total: Option<u64>,
+    /// A video quality (and clip) chosen in the picker or the browser.
+    pub video: Option<flux_media::Selection>,
 }
 
 /// File information for the start dialog, from a quick request to the server.
@@ -62,6 +62,7 @@ pub struct Probe {
 pub struct Manager {
     pub app: AppHandle,
     pub engine: Engine,
+    pub media: flux_media::Tools,
     store: Mutex<Store>,
     pub settings: RwLock<Settings>,
     records: Mutex<Vec<Record>>,
@@ -92,6 +93,7 @@ impl Manager {
         let manager = Arc::new(Manager {
             app,
             engine,
+            media: flux_media::Tools::new(video_tools_directory(), flux_store::default_directory().join("tools")),
             store: Mutex::new(store),
             settings: RwLock::new(settings),
             records: Mutex::new(records),
@@ -105,8 +107,7 @@ impl Manager {
 
     fn view_of(&self, record: &Record) -> View {
         let live = self.live.lock().unwrap();
-        let (speed, connections, note) = live.get(&record.id).map(|l| (l.speed, l.connections, l.note.clone())).unwrap_or((0.0, 0, None));
-        View::of(record, speed, connections, note)
+        View::of(record, live.get(&record.id).map(|l| &l.info).unwrap_or(&LiveInfo::default()))
     }
     pub fn views(&self) -> Vec<View> {
         let records = self.records.lock().unwrap().clone();
@@ -163,7 +164,7 @@ impl Manager {
 
     // ------------------------------------------------------------------ adding
 
-    fn folder_for(&self, category: &str) -> PathBuf {
+    pub fn folder_for(&self, category: &str) -> PathBuf {
         let settings = self.settings.read().unwrap();
         if settings.category_folders && category != "Other" { settings.download_dir.join(category) } else { settings.download_dir.clone() }
     }
@@ -221,7 +222,12 @@ impl Manager {
     }
 
     pub fn add(self: &Arc<Self>, request: AddRequest) -> Result<String, String> {
-        let url = Url::parse(request.url.trim()).map_err(|_| "Enter a full address starting with http:// or https://.".to_string())?;
+        let mut url = Url::parse(request.url.trim()).map_err(|_| "Enter a full address starting with http:// or https://.".to_string())?;
+        if let Some(selection) = &request.video {
+            selection.validate(url.as_str())?;
+            // Video jobs keep the page's normal form (one address per YouTube video).
+            url = Url::parse(&flux_media::pages::canonicalize(url.as_str()).ok_or("Use a video page or an HLS/DASH stream address.")?).map_err(|e| e.to_string())?;
+        }
         if !matches!(url.scheme(), "http" | "https") || !url.username().is_empty() {
             return Err("Only HTTP and HTTPS links without a user name in them are supported.".into());
         }
@@ -233,8 +239,17 @@ impl Manager {
         if let Some(session) = &request.session {
             session.validate(&url).map_err(|e| e.message)?;
         }
-        let name = request.file_name.as_deref().filter(|n| !n.trim().is_empty()).map(flux_engine::sanitize_file_name).unwrap_or_else(|| Manager::name_from_url(&url));
-        let category = request.category.clone().unwrap_or_else(|| category_for(&name).to_string());
+        let mut name = request.file_name.as_deref().filter(|n| !n.trim().is_empty()).map(flux_engine::sanitize_file_name).unwrap_or_else(|| Manager::name_from_url(&url));
+        if let Some(selection) = &request.video {
+            // The file is named after the format that will be written.
+            let stem = Path::new(&name).file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "Video".into());
+            name = format!("{stem}.{}", selection.extension);
+        }
+        let category = request.category.clone().unwrap_or_else(|| match &request.video {
+            Some(selection) if selection.audio_only => "Music".to_string(),
+            Some(_) => "Video".to_string(),
+            None => category_for(&name).to_string(),
+        });
         let folder = request.folder.as_ref().map(PathBuf::from).filter(|p| p.is_absolute()).unwrap_or_else(|| self.folder_for(&category));
         std::fs::create_dir_all(&folder).map_err(|e| format!("The folder could not be created: {e}"))?;
         let destination = self.unique(&folder, &name);
@@ -250,11 +265,11 @@ impl Manager {
             description: request.description.clone().filter(|d| !d.trim().is_empty()).unwrap_or_else(|| url.host_str().unwrap_or_default().trim_start_matches("www.").to_string()),
             queue: queue.clone(),
             status: if start == "later" { Status::Paused } else { Status::Queued },
-            kind: Kind::Http,
+            kind: match &request.video { Some(selection) => Kind::Video { selection: selection.clone() }, None => Kind::Http },
             added_ms: now_ms(),
             last_try_ms: None,
             completed_ms: None,
-            total: request.total,
+            total: request.total.or(request.video.as_ref().and_then(|v| v.total_bytes)),
             written: 0,
             error: None,
             connections: settings.connections,
@@ -310,12 +325,19 @@ impl Manager {
             r.error = None;
             r.last_try_ms = Some(now_ms());
         }) else { return };
-        if !matches!(record.kind, Kind::Http) {
-            return; // Video and torrent runners are added in M4/M5.
-        }
         let cancel = CancellationToken::new();
         let limiter = Limiter::new(record.speed_limit);
-        self.live.lock().unwrap().insert(id.to_string(), Live { cancel: cancel.clone(), limiter: limiter.clone(), speed: 0.0, connections: 0, note: None });
+        self.live.lock().unwrap().insert(id.to_string(), Live { cancel: cancel.clone(), limiter: limiter.clone(), info: LiveInfo::default() });
+        match &record.kind {
+            Kind::Http => {}
+            Kind::Video { selection } => return self.run_video(record.clone(), selection.clone(), cancel),
+            Kind::Torrent { .. } => {
+                self.live.lock().unwrap().remove(id);
+                self.update(id, |r| { r.status = Status::Failed; r.error = Some("Torrents arrive in a later Flux 2.0 build.".into()); });
+                self.emit(id);
+                return;
+            }
+        }
         self.emit(id);
         let mut job = Job {
             url: Url::parse(&record.url).expect("stored address"),
@@ -354,8 +376,8 @@ impl Manager {
                     if r.status != Status::Finishing { r.status = Status::Downloading; }
                 });
                 if let Some(live) = self.live.lock().unwrap().get_mut(id) {
-                    live.speed = bytes_per_second;
-                    live.connections = connections;
+                    live.info.speed = bytes_per_second;
+                    live.info.connections = connections;
                 }
             }
             Event::Checkpoint(resume) => {
@@ -365,12 +387,12 @@ impl Manager {
             Event::Retrying { delay, error, .. } => {
                 self.update(id, |r| { r.status = Status::Retrying; r.error = Some(error.message.clone()); });
                 if let Some(live) = self.live.lock().unwrap().get_mut(id) {
-                    live.note = Some(format!("{} Retrying in {} s.", error.message, delay.as_secs().max(1)));
+                    live.info.note = Some(format!("{} Retrying in {} s.", error.message, delay.as_secs().max(1)));
                 }
             }
             Event::Note(note) => {
                 if let Some(live) = self.live.lock().unwrap().get_mut(id) {
-                    live.note = Some(note);
+                    live.info.note = Some(note);
                 }
             }
         }
@@ -402,15 +424,117 @@ impl Manager {
                 }
             }
         });
+        self.finished(id, completed, result.as_ref().err().map(|e| e.message.clone()));
+    }
+
+    /// After any transfer ends: save, tell the windows, start what waits.
+    fn finished(self: &Arc<Self>, id: &str, completed: bool, error: Option<String>) {
         self.save(id);
         self.emit(id);
         if completed {
             let _ = self.app.emit("completed", id.to_string());
-        } else if let Err(error) = &result {
-            let _ = self.app.emit("failed", (id.to_string(), error.message.clone()));
+        } else if let Some(error) = error {
+            let _ = self.app.emit("failed", (id.to_string(), error));
         }
         self.schedule();
         self.check_queues_done();
+    }
+
+    // ------------------------------------------------------------------ videos
+
+    /// Where a video download keeps its parts between pauses.
+    fn video_work(record: &Record) -> PathBuf {
+        record.destination.parent().unwrap_or(Path::new("")).join(format!(".flux-video-{}", record.id))
+    }
+
+    fn run_video(self: &Arc<Self>, record: Record, selection: flux_media::Selection, cancel: CancellationToken) {
+        let settings = self.settings.read().unwrap().clone();
+        let limit = match (record.speed_limit, settings.speed_limit) {
+            (0, global) => global,
+            (own, 0) => own,
+            (own, global) => own.min(global),
+        };
+        let mut job = flux_media::VideoJob {
+            page: record.url.clone(),
+            destination: record.destination.clone(),
+            work: Manager::video_work(&record),
+            selection,
+            session: record.session.clone(),
+            connections: record.connections,
+            retries: settings.max_retries,
+            speed_limit: limit,
+            expected_sha256: record.expected_sha256.clone(),
+        };
+        self.emit(&record.id);
+        let manager = self.clone();
+        let id = record.id.clone();
+        tauri::async_runtime::spawn(async move {
+            let events = {
+                let manager = manager.clone();
+                let id = id.clone();
+                move |event: flux_media::MediaEvent| manager.on_video_event(&id, event)
+            };
+            let result = manager.media.download(&mut job, events, cancel).await;
+            manager.live.lock().unwrap().remove(&id);
+            let mut completed = false;
+            let error = result.as_ref().err().cloned();
+            manager.update(&id, |r| {
+                r.kind = Kind::Video { selection: job.selection.clone() };
+                match &result {
+                    Ok(flux_media::Outcome::Completed { path, bytes, sha256 }) => {
+                        r.destination = path.clone();
+                        r.status = Status::Completed;
+                        r.written = *bytes;
+                        r.total = Some(*bytes);
+                        r.sha256 = sha256.clone();
+                        r.error = None;
+                        r.completed_ms = Some(now_ms());
+                        completed = true;
+                    }
+                    Ok(flux_media::Outcome::Paused) => r.status = Status::Paused,
+                    Err(message) => {
+                        r.status = Status::Failed;
+                        r.error = Some(message.clone());
+                    }
+                }
+            });
+            manager.finished(&id, completed, error);
+        });
+    }
+
+    fn on_video_event(&self, id: &str, event: flux_media::MediaEvent) {
+        use flux_media::MediaEvent;
+        match event {
+            MediaEvent::Tracks(_) => {}
+            MediaEvent::Progress { written, total, estimated, bytes_per_second } => {
+                self.update(id, |r| {
+                    r.written = written;
+                    r.total = total.or(r.total);
+                    r.status = Status::Downloading;
+                });
+                if let Some(live) = self.live.lock().unwrap().get_mut(id) {
+                    live.info.speed = bytes_per_second;
+                    live.info.connections = 1;
+                    live.info.estimated = estimated;
+                    live.info.phase = None;
+                    live.info.phase_fraction = None;
+                }
+            }
+            MediaEvent::Phase { text, fraction } => {
+                self.update(id, |r| r.status = Status::Finishing);
+                if let Some(live) = self.live.lock().unwrap().get_mut(id) {
+                    live.info.speed = 0.0;
+                    live.info.phase = Some(text);
+                    live.info.phase_fraction = fraction;
+                }
+            }
+            MediaEvent::Impersonating => {
+                if let Some(live) = self.live.lock().unwrap().get_mut(id) {
+                    live.info.note = Some("The site refused ordinary requests; retrying as Chrome.".into());
+                }
+            }
+        }
+        self.emit(id);
     }
 
     /// When a scheduled queue has nothing left, run its "after" action once.
@@ -502,11 +626,13 @@ impl Manager {
                 records.remove(index)
             };
             let part = flux_engine::file::part_path(&record.destination);
+            let work = matches!(record.kind, Kind::Video { .. }).then(|| Manager::video_work(&record));
             // A running transfer releases its file a moment after cancelling.
             std::thread::spawn(move || {
                 std::thread::sleep(Duration::from_millis(400));
                 if delete_files { let _ = std::fs::remove_file(&record.destination); }
                 if record.status != Status::Completed || delete_files { let _ = std::fs::remove_file(part); }
+                if let Some(work) = work.filter(|_| record.status != Status::Completed || delete_files) { let _ = std::fs::remove_dir_all(work); }
             });
             let _ = self.store.lock().unwrap().remove_download(id);
             removed.push(id.clone());
@@ -541,10 +667,8 @@ impl Manager {
     pub fn redownload(self: &Arc<Self>, id: &str) -> Result<String, String> {
         let record = self.record(id).ok_or("Unknown download.")?;
         let name = record.name();
-        self.add(AddRequest { url: record.url, file_name: Some(name), session: record.session, start: Some("now".into()), ..Default::default() })
-    }
-    pub fn active_count(&self) -> usize {
-        self.live.lock().unwrap().len()
+        let video = match record.kind { Kind::Video { mut selection } => { selection.impersonate = false; Some(selection) } _ => None };
+        self.add(AddRequest { url: record.url, file_name: Some(name), session: record.session, start: Some("now".into()), video, ..Default::default() })
     }
     pub fn shutdown(&self) {
         for live in self.live.lock().unwrap().values() {
@@ -552,6 +676,18 @@ impl Manager {
         }
         self.save_all();
     }
+}
+
+/// The bundled video tools: beside Flux when installed; in a development build, the repository's
+/// copy or the one Flux 1.x installed.
+fn video_tools_directory() -> PathBuf {
+    let exe = std::env::current_exe().ok().and_then(|p| p.parent().map(Path::to_path_buf)).unwrap_or_default();
+    let mut candidates = vec![exe.join("video-tools"), exe.join("../../../video-tools")];
+    if let Some(local) = std::env::var_os("LOCALAPPDATA") {
+        candidates.push(PathBuf::from(local).join("Programs").join("Apex Downloader").join("video-tools"));
+    }
+    let complete = |dir: &PathBuf| ["yt-dlp.exe", "ffmpeg.exe", "ffprobe.exe"].iter().all(|n| dir.join(n).exists());
+    candidates.iter().find(|d| complete(d)).cloned().unwrap_or_else(|| candidates[0].clone())
 }
 
 fn rand_u16() -> u16 {

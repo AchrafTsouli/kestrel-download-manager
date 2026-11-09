@@ -72,9 +72,9 @@ async fn handle(app: &AppHandle, request: Request) -> Response {
                 return crate::torrents::offer_magnet(app, &url);
             }
             if request.video.is_some() {
-                return crate::media::download(app, &request);
+                return crate::media::download(app, &request).await;
             }
-            let pending = PendingRequest { url, file_name: request.file_name.clone(), description: None, session: request.session.clone(), request_id: request.request_id.clone() };
+            let pending = PendingRequest { url, file_name: request.file_name.clone(), session: request.session.clone(), request_id: request.request_id.clone(), ..Default::default() };
             // The browser waits for this answer before cancelling its own copy; the start dialog
             // keeps the request, so it is accepted now and nothing is lost if the user is away.
             let app = app.clone();
