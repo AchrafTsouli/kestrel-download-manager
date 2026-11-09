@@ -132,11 +132,10 @@ impl Manager {
         }
     }
     fn save(&self, id: &str) {
-        if let Some(record) = self.record(id) {
-            if let Err(error) = self.store.lock().unwrap().save_download(id, &record) {
+        if let Some(record) = self.record(id)
+            && let Err(error) = self.store.lock().unwrap().save_download(id, &record) {
                 let _ = self.app.emit("message", format!("Could not save the download list: {error}"));
             }
-        }
     }
     fn save_all(&self) {
         let list: Vec<(String, Record)> = self.records.lock().unwrap().iter().map(|r| (r.id.clone(), r.clone())).collect();
@@ -200,11 +199,10 @@ impl Manager {
                 job.session = session;
                 match tokio::time::timeout(Duration::from_secs(20), self.engine.probe(&mut job)).await {
                     Ok(Ok(info)) => {
-                        if let Some(server_name) = info.file_name.filter(|n| !n.is_empty()) {
-                            if name == "download.bin" || Path::new(&name).extension().is_none() || probe.file_name == Manager::name_from_url(&job.url) {
+                        if let Some(server_name) = info.file_name.filter(|n| !n.is_empty())
+                            && (name == "download.bin" || Path::new(&name).extension().is_none() || probe.file_name == Manager::name_from_url(&job.url)) {
                                 name = server_name;
                             }
-                        }
                         probe.total = info.total;
                         probe.resumable = info.ranged;
                         probe.content_type = info.content_type;
@@ -231,11 +229,10 @@ impl Manager {
         if !matches!(url.scheme(), "http" | "https") || !url.username().is_empty() {
             return Err("Only HTTP and HTTPS links without a user name in them are supported.".into());
         }
-        if let Some(request_id) = &request.request_id {
-            if let Some(existing) = self.records.lock().unwrap().iter().find(|r| r.request_id.as_ref() == Some(request_id)) {
+        if let Some(request_id) = &request.request_id
+            && let Some(existing) = self.records.lock().unwrap().iter().find(|r| r.request_id.as_ref() == Some(request_id)) {
                 return Ok(existing.id.clone());
             }
-        }
         if let Some(session) = &request.session {
             session.validate(&url).map_err(|e| e.message)?;
         }
@@ -700,13 +697,12 @@ pub fn percent_decode(text: &str) -> String {
     let mut out = Vec::with_capacity(bytes.len());
     let mut i = 0;
     while i < bytes.len() {
-        if bytes[i] == b'%' && i + 2 < bytes.len() {
-            if let Ok(b) = u8::from_str_radix(&text[i + 1..i + 3], 16) {
+        if bytes[i] == b'%' && i + 2 < bytes.len()
+            && let Ok(b) = u8::from_str_radix(&text[i + 1..i + 3], 16) {
                 out.push(b);
                 i += 3;
                 continue;
             }
-        }
         out.push(bytes[i]);
         i += 1;
     }

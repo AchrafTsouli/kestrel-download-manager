@@ -557,7 +557,7 @@ pub fn run() {
         .setup(|app| {
             let handle = app.handle().clone();
             let data_dir = flux_store::default_directory();
-            let manager = Manager::open(handle.clone(), &data_dir).map_err(|e| Box::<dyn std::error::Error>::from(e))?;
+            let manager = Manager::open(handle.clone(), &data_dir).map_err(Box::<dyn std::error::Error>::from)?;
             app.manage(manager.clone());
             // Learned per-site connection limits are kept with the settings.
             let saver = manager.clone();
@@ -578,14 +578,13 @@ pub fn run() {
             bridge::serve(handle.clone());
             media::keep_tools_current(handle.clone());
             // The main window starts hidden; Flux started by Windows or the browser stays in the tray.
-            if !std::env::args().any(|a| a == "--background") {
-                if let Some(window) = handle.get_webview_window("main") { let _ = window.show(); let _ = window.set_focus(); }
-            }
+            if !std::env::args().any(|a| a == "--background")
+                && let Some(window) = handle.get_webview_window("main") { let _ = window.show(); let _ = window.set_focus(); }
             Ok(())
         })
         .on_window_event(|window, event| {
-            if let WindowEvent::CloseRequested { api, .. } = event {
-                if window.label() == "main" {
+            if let WindowEvent::CloseRequested { api, .. } = event
+                && window.label() == "main" {
                     let manager = window.app_handle().state::<Shared>();
                     if manager.settings.read().unwrap().minimize_to_tray {
                         api.prevent_close();
@@ -595,7 +594,6 @@ pub fn run() {
                         window.app_handle().exit(0);
                     }
                 }
-            }
         })
         .invoke_handler(tauri::generate_handler![
             list_downloads, get_download, get_settings, save_settings, offer_url, get_pending, confirm_pending, cancel_pending,

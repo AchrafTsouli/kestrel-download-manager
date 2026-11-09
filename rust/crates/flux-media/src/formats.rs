@@ -188,11 +188,10 @@ pub fn parse(json: &str) -> Result<Catalog, String> {
     let document: Value = serde_json::from_str(json).map_err(|e| format!("The video tool returned unreadable data: {e}"))?;
     let mut root = &document;
     // Pages with several videos (a post with clips) return a playlist; use its first video.
-    if is_playlist(root) {
-        if let Some(first) = root.get("entries").and_then(Value::as_array).and_then(|e| e.first()).filter(|e| e.get("formats").is_some()) {
+    if is_playlist(root)
+        && let Some(first) = root.get("entries").and_then(Value::as_array).and_then(|e| e.first()).filter(|e| e.get("formats").is_some()) {
             root = first;
         }
-    }
     if root.get("is_live").and_then(Value::as_bool) == Some(true) {
         return Err("Live broadcasts are not supported yet. Retry when the broadcast has finished.".into());
     }

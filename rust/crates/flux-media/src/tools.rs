@@ -85,11 +85,10 @@ impl Tools {
             return Err("The video tools are missing. Reinstall Flux to restore them.".into());
         }
         // A verified newer yt-dlp replaces the aging bundled copy; FFmpeg and QuickJS stay bundled.
-        if tool == "yt-dlp.exe" {
-            if let Some(updated) = update::preferred(&self.directory, &self.update_directory) {
+        if tool == "yt-dlp.exe"
+            && let Some(updated) = update::preferred(&self.directory, &self.update_directory) {
                 return Ok(updated);
             }
-        }
         Ok(self.directory.join(tool))
     }
 
@@ -372,11 +371,10 @@ impl Tools {
         args.extend(["-movflags".into(), "+faststart".into(), output.display().to_string()]);
         events(MediaEvent::Phase { text: "Cutting to the exact second".into(), fraction: Some(0.0) });
         let line = |text: &str| {
-            if let Some(us) = text.strip_prefix("out_time_us=").and_then(|v| v.parse::<i64>().ok()) {
-                if duration > 0.0 {
+            if let Some(us) = text.strip_prefix("out_time_us=").and_then(|v| v.parse::<i64>().ok())
+                && duration > 0.0 {
                     events(MediaEvent::Phase { text: "Cutting to the exact second".into(), fraction: Some((us as f64 / 1e6 / duration).clamp(0.0, 1.0)) });
                 }
-            }
         };
         let result = self.run("ffmpeg.exe", &args, line, cancel).await?;
         if result.code != Some(0) || !output.exists() {
@@ -435,12 +433,11 @@ impl Tracker {
             return;
         }
         if let Some(chosen) = text.strip_prefix("FLUXFORMAT:") {
-            if let Ok(chosen) = serde_json::from_str::<String>(chosen) {
-                if formats::valid_format_id(&chosen) {
+            if let Ok(chosen) = serde_json::from_str::<String>(chosen)
+                && formats::valid_format_id(&chosen) {
                     self.ids = chosen.split('+').map(String::from).collect();
                     events(MediaEvent::Tracks(self.ids.clone()));
                 }
-            }
             return;
         }
         for (prefix, phase) in [("[Merger]", "Joining video and audio"), ("[VideoRemuxer]", "Preparing the file"), ("[FixupM3u8]", "Preparing the file"), ("[VideoConvertor]", "Preparing the file")] {
