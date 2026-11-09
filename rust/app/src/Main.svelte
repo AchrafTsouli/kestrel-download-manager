@@ -1,6 +1,7 @@
 <script lang="ts">
   import { listen } from "@tauri-apps/api/event";
   import { open as pickFile } from "@tauri-apps/plugin-dialog";
+  import { startDrag } from "@crabnebula/tauri-plugin-drag";
   import { onMount } from "svelte";
   import Icon from "./lib/Icon.svelte";
   import { call, categories, running, resumable, size, percent, timeLeft, stamp, statusText, statusClass, applyTheme, type Download, type Settings, type AfterQueue } from "./lib/api";
@@ -143,6 +144,20 @@
     const path = await pickFile({ title: "Open torrent file", filters: [{ name: "Torrent files", extensions: ["torrent"] }] });
     if (typeof path === "string") call("open_torrent_file", { path }).catch((e) => (message = String(e)));
   }
+  // A finished row dragged a few pixels leaves Flux as the file itself (to Explorer, a mail…).
+  let dragFrom: { d: Download; x: number; y: number } | null = null;
+  function rowDown(d: Download, e: MouseEvent) {
+    if (e.button !== 0) return;
+    select(d, e);
+    dragFrom = d.status === "Completed" && d.exists ? { d, x: e.clientX, y: e.clientY } : null;
+  }
+  async function rowMove(e: MouseEvent) {
+    if (!dragFrom || !(e.buttons & 1) || Math.hypot(e.clientX - dragFrom.x, e.clientY - dragFrom.y) < 6) return;
+    const d = dragFrom.d;
+    dragFrom = null;
+    try { const item = await call<{ path: string; icon: string }>("drag_item", { id: d.id }); await startDrag({ item: [item.path], icon: item.icon }); }
+    catch (err) { message = String(err); }
+  }
   const ids = () => [...selected];
   const resume = () => call("resume_downloads", { ids: ids() });
   const stop = () => call("pause_downloads", { ids: ids() });
@@ -274,7 +289,7 @@
           <thead><tr><th>File Name</th><th class="c">Q</th><th class="r">Size</th><th>Status</th><th class="r">Time left</th><th class="r">Transfer rate</th><th>Last Try…</th><th>Description</th><th>Progress</th></tr></thead>
           <tbody>
             {#each visible as d (d.id)}
-              <tr class:sel={selected.has(d.id)} onmousedown={(e) => e.button === 0 && select(d, e)} ondblclick={() => activate(d)} oncontextmenu={(e) => rowMenu(d, e)} title={d.error ?? d.url}>
+              <tr class:sel={selected.has(d.id)} onmousedown={(e) => rowDown(d, e)} onmousemove={rowMove} onmouseup={() => (dragFrom = null)} ondblclick={() => activate(d)} oncontextmenu={(e) => rowMenu(d, e)} title={d.error ?? d.url}>
                 <td class="name"><Icon name={d.category} size={15} /><span>{d.name}</span></td>
                 <td class="c">{d.status === "Queued" ? "⏱" : ""}</td>
                 <td class="r">{size(d.total)}</td>

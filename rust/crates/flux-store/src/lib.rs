@@ -22,6 +22,10 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 /// `%LOCALAPPDATA%\Flux` on Windows (the app may pass another folder, e.g. for a portable copy).
 pub fn default_directory() -> PathBuf {
+    // FLUX_DATA_DIR (an absolute folder) keeps a separate Flux: tests, or a copy on a USB stick.
+    if let Some(dir) = std::env::var_os("FLUX_DATA_DIR").map(PathBuf::from).filter(|d| d.is_absolute()) {
+        return dir;
+    }
     std::env::var_os("LOCALAPPDATA").map(PathBuf::from).unwrap_or_else(std::env::temp_dir).join("Flux")
 }
 

@@ -1,6 +1,7 @@
 //! Flux 2.0's desktop app: windows, tray, scheduler and commands on top of the download manager.
 
 mod bridge;
+mod desktop;
 mod manager;
 mod media;
 mod migrate;
@@ -550,6 +551,20 @@ async fn check_updates(app: AppHandle) -> Result<updates::UpdateInfo, String> {
 async fn install_update(app: AppHandle) -> Result<(), String> {
     updates::install(&app).await
 }
+/// What the windows need to drag a finished file out of Flux (to Explorer, a mail, a chat).
+#[derive(Serialize)]
+struct DragItem {
+    path: String,
+    icon: String,
+}
+#[tauri::command]
+fn drag_item(manager: Mgr, id: String) -> Result<DragItem, String> {
+    let record = manager.record(&id).ok_or("Unknown download.")?;
+    if record.status != model::Status::Completed || !record.destination.exists() {
+        return Err("Only a finished file that is still there can be dragged.".into());
+    }
+    Ok(DragItem { path: record.destination.to_string_lossy().into_owned(), icon: desktop::drag_icon()?.to_string_lossy().into_owned() })
+}
 #[tauri::command]
 fn app_version(app: AppHandle) -> String {
     app.package_info().version.to_string()
@@ -654,6 +669,8 @@ pub fn run() {
             }
         }))
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_drag::init())
         .manage(Windows::default())
         .setup(|app| {
             let handle = app.handle().clone();
@@ -673,8 +690,16 @@ pub fn run() {
                 if let Some(window) = completer.get_webview_window(&format!("progress-{id}")) { let _ = window.close(); }
                 if settings.play_sounds { system::sound(true); }
                 if settings.show_complete_dialog { open_complete(&completer, &id); }
+                desktop::completed(&completer, &id, settings.show_complete_dialog);
+            });
+            let failures = handle.clone();
+            handle.listen("failed", move |event| {
+                if let Ok((id, error)) = serde_json::from_str::<(String, String)>(event.payload()) {
+                    desktop::failed(&failures, &id, &error);
+                }
             });
             tray(&handle)?;
+            desktop::taskbar_progress(handle.clone());
             scheduler(handle.clone());
             clipboard_monitor(handle.clone());
             bridge::serve(handle.clone());
@@ -700,7 +725,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             list_downloads, get_download, get_settings, save_settings, offer_url, get_pending, confirm_pending, cancel_pending,
-            probe_video, video_exact_cut, confirm_video, video_as_file, load_torrent, confirm_torrent, open_torrent_file, check_updates, install_update,
+            probe_video, video_exact_cut, confirm_video, video_as_file, load_torrent, confirm_torrent, open_torrent_file, check_updates, install_update, drag_item,
             add_downloads, pause_downloads, resume_downloads, pause_all, resume_all, remove_downloads, remove_completed,
             rename_download, redownload, set_speed_limit, set_queue, enqueue, start_queue, stop_queue, running_queues,
             open_file, show_in_folder, open_folder, show_progress, show_window, power_action, exit_app, app_version

@@ -349,3 +349,26 @@ mod real {
         assert_eq!(records.len(), history.downloads.len(), "every 1.x download maps");
     }
 }
+
+#[cfg(test)]
+mod seed {
+    /// Prepares a separate Flux (FLUX_DATA_DIR) for end-to-end runs: no dialogs, downloads into
+    /// FLUX_TEST_DOWNLOADS, and no 1.x import.
+    #[test]
+    #[ignore]
+    fn seed_test_profile() {
+        let dir = flux_store::default_directory();
+        assert!(std::env::var_os("FLUX_DATA_DIR").is_some(), "set FLUX_DATA_DIR");
+        let mut store = flux_store::Store::open(&dir.join("history.db")).unwrap();
+        let mut settings = crate::model::Settings::default();
+        settings.download_dir = std::env::var_os("FLUX_TEST_DOWNLOADS").map(std::path::PathBuf::from).expect("set FLUX_TEST_DOWNLOADS");
+        settings.show_start_dialog = false;
+        settings.show_progress_window = false;
+        settings.show_complete_dialog = false;
+        settings.auto_check_updates = false;
+        settings.auto_update_tools = false;
+        settings.monitor_clipboard = false;
+        store.set("settings", &settings).unwrap();
+        store.set("imported-v1", &true).unwrap();
+    }
+}
