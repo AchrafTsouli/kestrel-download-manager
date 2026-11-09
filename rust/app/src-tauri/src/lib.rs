@@ -1,8 +1,11 @@
 //! Flux 2.0's desktop app: windows, tray, scheduler and commands on top of the download manager.
 
+mod bridge;
 mod manager;
+mod media;
 mod model;
 mod system;
+mod torrents;
 
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -411,8 +414,10 @@ pub fn run() {
             tray(&handle)?;
             scheduler(handle.clone());
             clipboard_monitor(handle.clone());
-            if std::env::args().any(|a| a == "--background") {
-                if let Some(window) = handle.get_webview_window("main") { let _ = window.hide(); }
+            bridge::serve(handle.clone());
+            // The main window starts hidden; Flux started by Windows or the browser stays in the tray.
+            if !std::env::args().any(|a| a == "--background") {
+                if let Some(window) = handle.get_webview_window("main") { let _ = window.show(); let _ = window.set_focus(); }
             }
             Ok(())
         })

@@ -14,6 +14,7 @@ publish = false
 [workspace.dependencies]
 flux-engine = { path = "crates/flux-engine" }
 flux-store = { path = "crates/flux-store" }
+flux-ipc = { path = "crates/flux-ipc" }
 labserver = { path = "tools/labserver" }
 
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "fs", "io-util", "net", "signal"] }
