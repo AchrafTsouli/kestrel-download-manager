@@ -17,6 +17,7 @@ flux-store = { path = "crates/flux-store" }
 flux-ipc = { path = "crates/flux-ipc" }
 flux-media = { path = "crates/flux-media" }
 flux-torrent = { path = "crates/flux-torrent" }
+flux-update = { path = "crates/flux-update" }
 labserver = { path = "tools/labserver" }
 
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "fs", "io-util", "net", "signal"] }

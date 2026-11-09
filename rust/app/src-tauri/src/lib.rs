@@ -3,9 +3,11 @@
 mod bridge;
 mod manager;
 mod media;
+mod migrate;
 mod model;
 mod system;
 mod torrents;
+mod updates;
 
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -541,6 +543,14 @@ fn exit_app(app: AppHandle) {
     app.exit(0);
 }
 #[tauri::command]
+async fn check_updates(app: AppHandle) -> Result<updates::UpdateInfo, String> {
+    updates::check(&app).await
+}
+#[tauri::command]
+async fn install_update(app: AppHandle) -> Result<(), String> {
+    updates::install(&app).await
+}
+#[tauri::command]
 fn app_version(app: AppHandle) -> String {
     app.package_info().version.to_string()
 }
@@ -647,6 +657,7 @@ pub fn run() {
         .manage(Windows::default())
         .setup(|app| {
             let handle = app.handle().clone();
+            system::hold_running_mutex();
             let data_dir = flux_store::default_directory();
             let manager = Manager::open(handle.clone(), &data_dir).map_err(Box::<dyn std::error::Error>::from)?;
             app.manage(manager.clone());
@@ -668,6 +679,7 @@ pub fn run() {
             clipboard_monitor(handle.clone());
             bridge::serve(handle.clone());
             media::keep_tools_current(handle.clone());
+            updates::check_daily(handle.clone());
             // The main window starts hidden; Flux started by Windows or the browser stays in the tray.
             if !std::env::args().any(|a| a == "--background")
                 && let Some(window) = handle.get_webview_window("main") { let _ = window.show(); let _ = window.set_focus(); }
@@ -688,7 +700,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             list_downloads, get_download, get_settings, save_settings, offer_url, get_pending, confirm_pending, cancel_pending,
-            probe_video, video_exact_cut, confirm_video, video_as_file, load_torrent, confirm_torrent, open_torrent_file,
+            probe_video, video_exact_cut, confirm_video, video_as_file, load_torrent, confirm_torrent, open_torrent_file, check_updates, install_update,
             add_downloads, pause_downloads, resume_downloads, pause_all, resume_all, remove_downloads, remove_completed,
             rename_download, redownload, set_speed_limit, set_queue, enqueue, start_queue, stop_queue, running_queues,
             open_file, show_in_folder, open_folder, show_progress, show_window, power_action, exit_app, app_version

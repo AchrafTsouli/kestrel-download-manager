@@ -78,7 +78,17 @@ pub type Shared = Arc<Manager>;
 
 impl Manager {
     pub fn open(app: AppHandle, data_dir: &Path) -> Result<Shared, String> {
-        let store = Store::open(&data_dir.join("history.db")).map_err(|e| e.to_string())?;
+        let mut store = Store::open(&data_dir.join("history.db")).map_err(|e| e.to_string())?;
+        // The first start after Flux 1.x brings its settings and downloads along (once).
+        let fresh = store.get::<Settings>("settings").map_err(|e| e.to_string())?.is_none() && store.get::<bool>("imported-v1").ok().flatten().is_none();
+        if fresh {
+            if let Some((settings, records)) = crate::migrate::import(&flux_store::v1_history_path(), &data_dir.join("torrents")) {
+                let list: Vec<(String, Record)> = records.into_iter().map(|r| (r.id.clone(), r)).collect();
+                store.save_downloads(&list).map_err(|e| e.to_string())?;
+                store.set("settings", &settings).map_err(|e| e.to_string())?;
+            }
+            store.set("imported-v1", &true).map_err(|e| e.to_string())?;
+        }
         let settings: Settings = store.get("settings").map_err(|e| e.to_string())?.unwrap_or_default();
         let mut records: Vec<Record> = store.load_downloads::<Record>().map_err(|e| e.to_string())?.into_iter().map(|(_, r)| r).collect();
         // Nothing runs before Flux starts it again; unfinished downloads wait as paused.

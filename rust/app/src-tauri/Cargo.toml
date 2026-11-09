@@ -31,8 +31,9 @@ flux-store.workspace = true
 flux-ipc.workspace = true
 flux-media.workspace = true
 flux-torrent.workspace = true
+flux-update.workspace = true
 arboard = { version = "3", default-features = false }
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.59", features = ["Win32_System_Diagnostics_Debug", "Win32_UI_WindowsAndMessaging"] }
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Security", "Win32_System_Diagnostics_Debug", "Win32_System_Threading", "Win32_UI_WindowsAndMessaging"] }

@@ -33,6 +33,9 @@ pub fn reveal(path: &Path) -> Result<(), String> {
     open_path(path.parent().unwrap_or(path))
 }
 
+/// The Run value's name: the one Flux 1.x and its installer use, so there is only ever one.
+const RUN_VALUE: &str = "ApexDownloader";
+
 /// Starts Flux in the tray when the user signs in (Windows Run key of the current user).
 pub fn set_autostart(enabled: bool) {
     #[cfg(windows)]
@@ -41,14 +44,25 @@ pub fn set_autostart(enabled: bool) {
         let key = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run";
         let result = if enabled {
             let exe = std::env::current_exe().map(|p| p.display().to_string()).unwrap_or_default();
-            Command::new("reg").args(["add", key, "/v", "Flux", "/t", "REG_SZ", "/d", &format!("\"{exe}\" --background"), "/f"]).creation_flags(0x0800_0000).status()
+            Command::new("reg").args(["add", key, "/v", RUN_VALUE, "/t", "REG_SZ", "/d", &format!("\"{exe}\" --background"), "/f"]).creation_flags(0x0800_0000).status()
         } else {
-            Command::new("reg").args(["delete", key, "/v", "Flux", "/f"]).creation_flags(0x0800_0000).status()
+            Command::new("reg").args(["delete", key, "/v", RUN_VALUE, "/f"]).creation_flags(0x0800_0000).status()
         };
         let _ = result;
     }
     #[cfg(not(windows))]
     let _ = enabled;
+}
+
+/// Holds the mutex the installer checks (`AppMutex`), so it asks to close a running Flux instead
+/// of replacing files in use. Same name as Flux 1.x.
+pub fn hold_running_mutex() {
+    #[cfg(windows)]
+    unsafe {
+        let name: Vec<u16> = "Local\\ApexDownloader.Running".encode_utf16().chain([0]).collect();
+        // Kept for the life of the process; Windows releases it on exit.
+        let _ = windows_sys::Win32::System::Threading::CreateMutexW(std::ptr::null(), 0, name.as_ptr());
+    }
 }
 
 pub fn power(action: AfterQueue) -> Result<(), String> {

@@ -22,6 +22,22 @@
   let deleteFiles = $state(false);
   let renaming: { id: string; name: string } | null = $state(null);
   let about = $state(false);
+  type UpdateInfo = { current: string; version: string; available: boolean; signed: boolean; url: string };
+  let update: UpdateInfo | null = $state(null);
+  let installing = $state(false);
+  async function checkUpdates() {
+    menu = null; message = "Checking for updates…";
+    try {
+      const info = await call<UpdateInfo>("check_updates");
+      if (info.available) { update = info; message = ""; } else message = `Flux ${info.current} is up to date.`;
+    } catch (e) { message = "Update check: " + String(e); }
+  }
+  async function installUpdate() {
+    if (!update) return;
+    if (!update.signed) { call("open_folder", { path: update.url }); update = null; return; }
+    installing = true;
+    try { await call("install_update"); } catch (e) { message = "Update: " + String(e); installing = false; update = null; }
+  }
   let version = $state("");
   let countdown: { queue: string; action: AfterQueue; seconds: number } | null = $state(null);
   let showCategories = $state(true);
@@ -65,6 +81,7 @@
       listen<Settings>("settings", ({ payload }) => { settings = payload; applyTheme(payload.theme); }),
       listen<string[]>("queues", ({ payload }) => (runningQueues = payload)),
       listen<string>("message", ({ payload }) => (message = payload)),
+      listen<UpdateInfo>("update-available", ({ payload }) => (update = payload)),
       listen<string>("completed", ({ payload }) => { const d = downloads.find((x) => x.id === payload); if (d) message = "Saved " + d.path; }),
       listen<[string, string]>("failed", ({ payload }) => { const d = downloads.find((x) => x.id === payload[0]); message = (d ? d.name + ": " : "") + payload[1]; }),
       listen("open-add", () => openAdd()),
@@ -184,6 +201,7 @@
     ],
     Help: [
       { label: "Flux on GitHub", run: () => call("open_folder", { path: "https://github.com/AchrafTsouli/flux-downloader" }) },
+      { label: "Check for updates", run: checkUpdates },
       { label: "About Flux", run: () => { about = true; menu = null; } },
     ],
   };
@@ -358,6 +376,22 @@
       <div class="dialog-actions">
         <button class="btn primary" onclick={() => { const a = countdown!.action; countdown = null; call("power_action", { action: a }); }}>Now</button>
         <button class="btn" onclick={() => (countdown = null)}>Cancel</button>
+      </div>
+    </div>
+  </div>
+{/if}
+
+{#if update}
+  <div class="scrim" role="presentation">
+    <div class="dialog small" role="dialog" aria-labelledby="update-title">
+      <div class="dialog-title" id="update-title">Update available</div>
+      <div class="dialog-body">
+        <p><b>Flux {update.version}</b> is available (you have {update.current}).</p>
+        <p class="muted">{update.signed ? "Downloads are paused and continue after the update. Flux restarts when it is installed." : "This release is not signed for automatic installation; its download page opens in your browser."}</p>
+      </div>
+      <div class="dialog-actions">
+        <button class="btn primary" onclick={installUpdate} disabled={installing}>{installing ? "Downloading…" : update.signed ? "Install now" : "Open download page"}</button>
+        <button class="btn" onclick={() => (update = null)} disabled={installing}>Later</button>
       </div>
     </div>
   </div>
