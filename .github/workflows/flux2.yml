@@ -1,0 +1,39 @@
+name: Flux 2.0 (Rust)
+
+on:
+  push:
+    paths: ["rust/**", ".github/workflows/flux2.yml"]
+  pull_request:
+    paths: ["rust/**", ".github/workflows/flux2.yml"]
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: rust
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: rust/app/package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+      - name: Build the interface
+        working-directory: rust/app
+        run: |
+          npm ci
+          npm run build
+      - name: Tests (engine, storage, lab server)
+        run: cargo test --workspace
+      - name: Lints
+        run: cargo clippy --workspace --all-targets -- -D clippy::correctness -D clippy::suspicious
+      - name: App build (no installer yet)
+        working-directory: rust/app
+        run: npx tauri build --no-bundle

@@ -1,0 +1,167 @@
+//! End-to-end engine checks against the local lab server (ported from Flux 1.x's integration suite).
+
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+
+use flux_engine::{Engine, ErrorKind, Event, HostLimits, Job, Options, Outcome};
+use labserver::{LabServer, expected};
+use tokio_util::sync::CancellationToken;
+use url::Url;
+
+fn temp(name: &str) -> PathBuf {
+    let dir = std::env::temp_dir().join(format!("flux-engine-tests-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join(name);
+    let _ = std::fs::remove_file(&path);
+    let _ = std::fs::remove_file(flux_engine::file::part_path(&path));
+    path
+}
+
+fn engine() -> Engine {
+    Engine::new(Options { retry_base: Duration::from_millis(20), checkpoint_every: Duration::from_millis(100), ..Options::default() }, HostLimits::new([]))
+}
+
+fn job(server: &LabServer, name: &str, query: &str, connections: usize) -> Job {
+    let mut job = Job::new(Url::parse(&server.url(name, query)).unwrap(), temp(name));
+    job.connections = connections;
+    job
+}
+
+async fn run(engine: &Engine, job: &mut Job) -> flux_engine::Result<Outcome> {
+    engine.download(job, |_| {}, CancellationToken::new()).await
+}
+
+#[tokio::test]
+async fn several_connections_produce_an_identical_file_without_a_part_file_left() {
+    let server = LabServer::start().await.unwrap();
+    let engine = engine();
+    let mut job = job(&server, "multi.bin", "size=12000003&seed=7", 6);
+    let outcome = run(&engine, &mut job).await.unwrap();
+    assert!(matches!(outcome, Outcome::Completed { bytes: 12000003, .. }));
+    assert_eq!(std::fs::read(&job.destination).unwrap(), expected(12000003, 7));
+    assert!(!flux_engine::file::part_path(&job.destination).exists(), "no assembly leftovers");
+    assert!(server.stats("multi.bin").max_concurrent >= 4, "connections were not used in parallel");
+}
+
+#[tokio::test]
+async fn pause_keeps_progress_and_resume_continues_from_it() {
+    let server = LabServer::start().await.unwrap();
+    let engine = engine();
+    let mut job = job(&server, "pause.bin", "size=8000000&seed=3&slow_us=2000", 4);
+    let cancel = CancellationToken::new();
+    let stopper = cancel.clone();
+    let checkpoints = Arc::new(Mutex::new(0));
+    let seen = checkpoints.clone();
+    tokio::spawn(async move { tokio::time::sleep(Duration::from_millis(600)).await; stopper.cancel(); });
+    let outcome = engine.download(&mut job, move |e| if let Event::Checkpoint(_) = e { *seen.lock().unwrap() += 1 }, cancel).await.unwrap();
+    assert_eq!(outcome, Outcome::Paused);
+    let saved = job.resume.written();
+    assert!(saved > 0 && saved < 8000000, "paused with {saved} bytes");
+    assert!(*checkpoints.lock().unwrap() > 0);
+    let before = server.stats("pause.bin").requests;
+    // The saved state survives serialization, as it does through the app's history.
+    job.resume = serde_json::from_str(&serde_json::to_string(&job.resume).unwrap()).unwrap();
+    let mut fast = job.clone();
+    fast.url = Url::parse(&server.url("pause.bin", "size=8000000&seed=3")).unwrap();
+    run(&engine, &mut fast).await.unwrap();
+    assert_eq!(std::fs::read(&fast.destination).unwrap(), expected(8000000, 3));
+    assert!(server.stats("pause.bin").requests > before);
+}
+
+#[tokio::test]
+async fn a_server_without_ranges_is_downloaded_on_one_connection() {
+    let server = LabServer::start().await.unwrap();
+    let mut job = job(&server, "norange.bin", "size=3000000&no_range=1", 8);
+    run(&engine(), &mut job).await.unwrap();
+    assert_eq!(std::fs::read(&job.destination).unwrap(), expected(3000000, 1));
+    assert!(!job.resume.ranged);
+}
+
+#[tokio::test]
+async fn a_site_refusing_extra_connections_finishes_with_fewer_and_is_remembered() {
+    let server = LabServer::start().await.unwrap();
+    let learned = Arc::new(Mutex::new(None));
+    let seen = learned.clone();
+    let engine = Engine::new(Options { retry_base: Duration::from_millis(20), ..Options::default() }, HostLimits::new([]).on_learned(move |h, n| *seen.lock().unwrap() = Some((h.to_string(), n))));
+    let mut first = job(&server, "limited.bin", "size=16000000&max_conn=2&slow_us=200", 8);
+    run(&engine, &mut first).await.unwrap();
+    assert_eq!(std::fs::read(&first.destination).unwrap(), expected(16000000, 1));
+    let stats = server.stats("limited.bin");
+    assert!(stats.refused > 0, "the server never refused, so nothing was tested");
+    let (host, limit) = learned.lock().unwrap().clone().expect("limit learned");
+    assert_eq!(host, "127.0.0.1");
+    assert!(limit <= 2, "learned {limit}");
+    let mut second = job(&server, "limited2.bin", "size=16000000&max_conn=2", 8);
+    run(&engine, &mut second).await.unwrap();
+    assert_eq!(server.stats("limited2.bin").refused, 0, "a remembered site was asked for too many connections again");
+}
+
+#[tokio::test]
+async fn a_site_accepting_only_browser_navigations_is_downloaded() {
+    let server = LabServer::start().await.unwrap();
+    let mut job = job(&server, "strict.bin", "size=2000000&need_nav=1", 4);
+    run(&engine(), &mut job).await.unwrap();
+    assert_eq!(std::fs::read(&job.destination).unwrap(), expected(2000000, 1));
+    assert!(job.session.unwrap().headers.iter().any(|h| h.value == "navigate"), "the accepted form was not kept");
+}
+
+#[tokio::test]
+async fn temporary_failures_and_cut_connections_are_retried() {
+    let server = LabServer::start().await.unwrap();
+    let engine = engine();
+    let mut failing = job(&server, "flaky.bin", "size=1500000&fail=2", 2);
+    run(&engine, &mut failing).await.unwrap();
+    assert_eq!(std::fs::read(&failing.destination).unwrap(), expected(1500000, 1));
+    let mut cut = job(&server, "cut.bin", "size=6000000&drop_at=2500000", 1);
+    run(&engine, &mut cut).await.unwrap();
+    assert_eq!(std::fs::read(&cut.destination).unwrap(), expected(6000000, 1));
+}
+
+#[tokio::test]
+async fn a_changed_file_restarts_safely_instead_of_mixing_versions() {
+    let server = LabServer::start().await.unwrap();
+    let engine = engine();
+    let mut job = job(&server, "changed.bin", "size=6000000&seed=1&slow_us=3000", 3);
+    let cancel = CancellationToken::new();
+    let stopper = cancel.clone();
+    tokio::spawn(async move { tokio::time::sleep(Duration::from_millis(400)).await; stopper.cancel(); });
+    engine.download(&mut job, |_| {}, cancel).await.unwrap();
+    assert!(job.resume.written() > 0);
+    job.url = Url::parse(&server.url("changed.bin", "size=6000000&seed=2")).unwrap();
+    run(&engine, &mut job).await.unwrap();
+    assert_eq!(std::fs::read(&job.destination).unwrap(), expected(6000000, 2));
+}
+
+#[tokio::test]
+async fn pages_missing_files_and_checksums_are_reported_clearly() {
+    let server = LabServer::start().await.unwrap();
+    let engine = engine();
+    let mut page = job(&server, "page.bin", "html=1", 2);
+    assert_eq!(run(&engine, &mut page).await.unwrap_err().kind, ErrorKind::Protocol);
+
+    let mut wrong = job(&server, "sum.bin", "size=100000", 1);
+    wrong.expected_sha256 = Some("0".repeat(64));
+    assert_eq!(run(&engine, &mut wrong).await.unwrap_err().kind, ErrorKind::Integrity);
+    assert!(!wrong.destination.exists(), "a file failing its checksum must not be published");
+
+    let mut right = job(&server, "sum2.bin", "size=100000", 1);
+    let data = expected(100000, 1);
+    right.expected_sha256 = Some({ use sha2::Digest; sha2::Sha256::digest(&data).iter().map(|b| format!("{b:02x}")).collect() });
+    assert!(matches!(run(&engine, &mut right).await.unwrap(), Outcome::Completed { sha256: Some(_), .. }));
+
+    let mut existing = job(&server, "exists.bin", "size=1000", 1);
+    std::fs::write(&existing.destination, b"keep me").unwrap();
+    assert_eq!(run(&engine, &mut existing).await.unwrap_err().kind, ErrorKind::Storage);
+    assert_eq!(std::fs::read(&existing.destination).unwrap(), b"keep me");
+}
+
+#[tokio::test]
+async fn speed_limit_is_respected() {
+    let server = LabServer::start().await.unwrap();
+    let mut job = job(&server, "limit.bin", "size=1000000", 4);
+    job.limiter.set_rate(400_000);
+    let start = std::time::Instant::now();
+    run(&engine(), &mut job).await.unwrap();
+    assert!(start.elapsed() >= Duration::from_millis(1500), "1 MB at 400 KB/s took {:?}", start.elapsed());
+}

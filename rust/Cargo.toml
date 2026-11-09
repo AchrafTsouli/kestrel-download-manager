@@ -1,0 +1,39 @@
+[workspace]
+resolver = "3"
+members = ["crates/*", "app/src-tauri", "tools/labserver"]
+
+[workspace.package]
+version = "2.0.0-alpha.1"
+edition = "2024"
+rust-version = "1.88"
+license = "MIT"
+authors = ["Achraf Tsouli"]
+repository = "https://github.com/AchrafTsouli/flux-downloader"
+publish = false
+
+[workspace.dependencies]
+flux-engine = { path = "crates/flux-engine" }
+flux-store = { path = "crates/flux-store" }
+labserver = { path = "tools/labserver" }
+
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "fs", "io-util", "net", "signal"] }
+tokio-util = "0.7"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream", "http2"] }
+hyper = { version = "1", features = ["server", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+http-body-util = "0.1"
+bytes = "1"
+futures-util = "0.3"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tracing = "0.1"
+url = "2"
+sha2 = "0.10"
+rusqlite = { version = "0.32", features = ["bundled"] }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true
+opt-level = 3

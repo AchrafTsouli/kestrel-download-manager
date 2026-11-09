@@ -1,0 +1,31 @@
+/* Flux "Glacier" palette: one token set, dark by default, light when Windows is in light mode
+   (an explicit app setting will override this in M2). Same values as Flux 1.x's GlacierPalette.cs. */
+:root {
+  --bg: #0e141b;
+  --surface: #141c25;
+  --raised: #1a2430;
+  --line: #263241;
+  --text: #dde7f0;
+  --muted: #8496a8;
+  --accent: #38bdf8;
+  --accent-2: #818cf8;
+  --selection: #173451;
+  --good: #4ade80;
+  --bad: #f87171;
+  --warn: #fbbf24;
+  --font: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  --mono: "Cascadia Mono", Consolas, ui-monospace, monospace;
+  color-scheme: dark;
+}
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg: #f4f7fa; --surface: #ffffff; --raised: #e8eef5; --line: #d3dce6; --text: #0f1b27; --muted: #5b6b7c;
+    --accent: #0284c7; --accent-2: #4f46e5; --selection: #cfe6f7; --good: #15803d; --bad: #b91c1c; --warn: #b45309;
+    color-scheme: light;
+  }
+}
+* { box-sizing: border-box; }
+html, body, #app { height: 100%; margin: 0; }
+body { background: var(--bg); color: var(--text); font: 13px/1.4 var(--font); user-select: none; overflow: hidden; }
+button { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
