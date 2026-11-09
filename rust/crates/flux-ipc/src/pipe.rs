@@ -116,7 +116,7 @@ mod tests {
     #[tokio::test]
     async fn a_request_crosses_the_pipe_and_a_second_owner_is_refused() {
         // A private name: a running Flux owns the real one.
-        let name = format!(r"\.\pipelux-bridge-test-{}", std::process::id());
+        let name = format!(r"\\.\pipe\flux-bridge-test-{}", std::process::id());
         let mut server = create_server_named(&name, true).expect("pipe");
         assert!(create_server_named(&name, true).is_err(), "a second first instance must fail");
         let serve = tokio::spawn(async move {
