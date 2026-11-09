@@ -1,5 +1,6 @@
 <script lang="ts">
   import { listen } from "@tauri-apps/api/event";
+  import { open as pickFile } from "@tauri-apps/plugin-dialog";
   import { onMount } from "svelte";
   import Icon from "./lib/Icon.svelte";
   import { call, categories, running, resumable, size, percent, timeLeft, stamp, statusText, statusClass, applyTheme, type Download, type Settings, type AfterQueue } from "./lib/api";
@@ -108,7 +109,7 @@
     adding = true; addError = ""; address = ""; menu = null;
     navigator.clipboard?.readText?.().then((t) => {
       t = t.trim();
-      if (!/^https?:\/\/\S+$/i.test(t) || address) return;
+      if (!/^(https?:\/\/|magnet:\?)\S+$/i.test(t) || address) return;
       address = t;
       requestAnimationFrame(() => (document.getElementById("address") as HTMLInputElement | null)?.select());
     }).catch(() => {});
@@ -119,6 +120,11 @@
     const existing = downloads.find((d) => d.url === url);
     if (existing && existing.status !== "Failed") { addError = `This address is already in the list as ${existing.name}.`; selected = new Set([existing.id]); return; }
     try { await call("offer_url", { url }); adding = false; } catch (error) { addError = String(error); }
+  }
+  async function openTorrentFile() {
+    menu = null;
+    const path = await pickFile({ title: "Open torrent file", filters: [{ name: "Torrent files", extensions: ["torrent"] }] });
+    if (typeof path === "string") call("open_torrent_file", { path }).catch((e) => (message = String(e)));
   }
   const ids = () => [...selected];
   const resume = () => call("resume_downloads", { ids: ids() });
@@ -149,6 +155,7 @@
     Tasks: [
       { label: "Add new download", key: "Ctrl+N", run: openAdd },
       { label: "Add batch download", run: () => showWindow("batch") },
+      { label: "Open torrent file…", run: openTorrentFile },
       { label: "Exit", sep: true, run: () => call("exit_app") },
     ],
     File: [
@@ -306,7 +313,7 @@
       <div class="dialog-body">
         <div class="field"><label for="address">Address</label>
           <!-- svelte-ignore a11y_autofocus -->
-          <input id="address" bind:value={address} autofocus autocomplete="off" spellcheck="false" placeholder="https://" />
+          <input id="address" bind:value={address} autofocus autocomplete="off" spellcheck="false" placeholder="https://… or magnet:?…" />
         </div>
         {#if addError}<p class="error" role="alert">{addError}</p>{/if}
       </div>

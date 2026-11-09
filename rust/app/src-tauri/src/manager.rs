@@ -43,6 +43,8 @@ pub struct AddRequest {
     pub total: Option<u64>,
     /// A video quality (and clip) chosen in the picker or the browser.
     pub video: Option<flux_media::Selection>,
+    /// A torrent's chosen files (the address is then its magnet link).
+    pub torrent: Option<flux_torrent::Selection>,
 }
 
 /// File information for the start dialog, from a quick request to the server.
@@ -63,6 +65,7 @@ pub struct Manager {
     pub app: AppHandle,
     pub engine: Engine,
     pub media: flux_media::Tools,
+    pub torrents: flux_torrent::Tools,
     store: Mutex<Store>,
     pub settings: RwLock<Settings>,
     records: Mutex<Vec<Record>>,
@@ -94,6 +97,7 @@ impl Manager {
             app,
             engine,
             media: flux_media::Tools::new(video_tools_directory(), flux_store::default_directory().join("tools")),
+            torrents: flux_torrent::Tools::new(video_tools_directory().join("aria2c.exe"), flux_store::default_directory().join("torrents")),
             store: Mutex::new(store),
             settings: RwLock::new(settings),
             records: Mutex::new(records),
@@ -220,6 +224,9 @@ impl Manager {
     }
 
     pub fn add(self: &Arc<Self>, request: AddRequest) -> Result<String, String> {
+        if let Some(selection) = request.torrent.clone() {
+            return self.add_torrent(request, selection);
+        }
         let mut url = Url::parse(request.url.trim()).map_err(|_| "Enter a full address starting with http:// or https://.".to_string())?;
         if let Some(selection) = &request.video {
             selection.validate(url.as_str())?;
@@ -290,6 +297,49 @@ impl Manager {
         Ok(id)
     }
 
+    /// A torrent is saved under its own name in the chosen folder (aria2 continues there after a pause).
+    fn add_torrent(self: &Arc<Self>, request: AddRequest, selection: flux_torrent::Selection) -> Result<String, String> {
+        let url = flux_torrent::magnet(&selection.info_hash, &selection.name);
+        selection.validate(&url)?;
+        if let Some(existing) = self.records.lock().unwrap().iter().find(|r| matches!(&r.kind, Kind::Torrent { selection: s } if s.info_hash == selection.info_hash) && r.status != Status::Completed) {
+            return Err(format!("This torrent is already in the list as {}.", existing.name()));
+        }
+        let folder = request.folder.as_ref().map(PathBuf::from).filter(|p| p.is_absolute()).unwrap_or_else(|| self.settings.read().unwrap().download_dir.join("Torrents"));
+        std::fs::create_dir_all(&folder).map_err(|e| format!("The folder could not be created: {e}"))?;
+        let settings = self.settings.read().unwrap().clone();
+        let start = request.start.clone().unwrap_or_else(|| "now".into());
+        let id = format!("{:016x}{:04x}", SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos() as u64, rand_u16());
+        let record = Record {
+            id: id.clone(),
+            url,
+            destination: folder.join(&selection.name),
+            category: "Other".into(),
+            description: request.description.clone().filter(|d| !d.trim().is_empty()).unwrap_or_else(|| "Torrent".into()),
+            queue: request.queue.clone().filter(|q| settings.queues.iter().any(|x| &x.name == q)).unwrap_or_else(|| MAIN_QUEUE.into()),
+            status: if start == "later" { Status::Paused } else { Status::Queued },
+            total: Some(selection.selected_bytes).filter(|b| *b > 0),
+            kind: Kind::Torrent { selection },
+            added_ms: now_ms(),
+            last_try_ms: None,
+            completed_ms: None,
+            written: 0,
+            error: None,
+            connections: 0,
+            speed_limit: 0,
+            session: None,
+            resume: Default::default(),
+            expected_sha256: None,
+            sha256: None,
+            request_id: request.request_id.clone(),
+            retries: 0,
+        };
+        self.records.lock().unwrap().push(record);
+        self.save(&id);
+        self.emit(&id);
+        if start == "now" { self.run(&id) } else { self.schedule() }
+        Ok(id)
+    }
+
     // ------------------------------------------------------------------ running
 
     fn running_in(&self, queue: &str) -> usize {
@@ -328,12 +378,7 @@ impl Manager {
         match &record.kind {
             Kind::Http => {}
             Kind::Video { selection } => return self.run_video(record.clone(), selection.clone(), cancel),
-            Kind::Torrent { .. } => {
-                self.live.lock().unwrap().remove(id);
-                self.update(id, |r| { r.status = Status::Failed; r.error = Some("Torrents arrive in a later Flux 2.0 build.".into()); });
-                self.emit(id);
-                return;
-            }
+            Kind::Torrent { selection } => return self.run_torrent(record.clone(), selection.clone(), cancel),
         }
         self.emit(id);
         let mut job = Job {
@@ -435,6 +480,74 @@ impl Manager {
         }
         self.schedule();
         self.check_queues_done();
+    }
+
+    // ------------------------------------------------------------------ torrents
+
+    fn run_torrent(self: &Arc<Self>, record: Record, selection: flux_torrent::Selection, cancel: CancellationToken) {
+        let global = self.settings.read().unwrap().speed_limit;
+        let limit = match (record.speed_limit, global) {
+            (0, global) => global,
+            (own, 0) => own,
+            (own, global) => own.min(global),
+        };
+        if let Some(live) = self.live.lock().unwrap().get_mut(&record.id) {
+            live.info.note = Some("Finding people who share this torrent…".into());
+        }
+        self.emit(&record.id);
+        let manager = self.clone();
+        let id = record.id.clone();
+        let folder = record.destination.parent().unwrap_or(Path::new("")).to_path_buf();
+        tauri::async_runtime::spawn(async move {
+            let events = {
+                let manager = manager.clone();
+                let id = id.clone();
+                let selection = selection.clone();
+                move |status: flux_torrent::Status| manager.on_torrent_status(&id, &selection, status)
+            };
+            let result = manager.torrents.download(&selection, &folder, limit, events, cancel).await;
+            manager.live.lock().unwrap().remove(&id);
+            let completed = matches!(result, Ok(flux_torrent::Outcome::Completed));
+            let error = result.as_ref().err().cloned();
+            manager.update(&id, |r| match &result {
+                Ok(flux_torrent::Outcome::Completed) => {
+                    r.status = Status::Completed;
+                    r.written = r.total.unwrap_or(r.written);
+                    r.error = None;
+                    r.completed_ms = Some(now_ms());
+                }
+                Ok(flux_torrent::Outcome::Paused) => r.status = Status::Paused,
+                Err(message) => {
+                    r.status = Status::Failed;
+                    r.error = Some(message.clone());
+                }
+            });
+            manager.finished(&id, completed, error);
+        });
+    }
+
+    fn on_torrent_status(&self, id: &str, selection: &flux_torrent::Selection, status: flux_torrent::Status) {
+        let seeding = status.state == "seeding";
+        let total = if selection.selected_bytes > 0 { selection.selected_bytes } else { status.total };
+        self.update(id, |r| {
+            if total > 0 { r.total = Some(total); }
+            r.written = if total > 0 { status.completed.min(total) } else { status.completed };
+            r.status = if seeding { Status::Finishing } else if status.connections > 0 || status.completed > 0 { Status::Downloading } else { Status::Connecting };
+        });
+        if let Some(live) = self.live.lock().unwrap().get_mut(id) {
+            live.info.speed = status.bytes_per_second;
+            live.info.connections = status.connections as usize;
+            live.info.note = Some(if seeding {
+                format!("Sharing with others for up to {} min", selection.seed_minutes)
+            } else if status.connections > 0 {
+                format!("{} peers · {} seeders", status.connections, status.seeders)
+            } else {
+                "Finding people who share this torrent…".into()
+            });
+            live.info.phase = seeding.then(|| "Sharing the finished files".into());
+            live.info.phase_fraction = None;
+        }
+        self.emit(id);
     }
 
     // ------------------------------------------------------------------ videos
@@ -624,10 +737,19 @@ impl Manager {
             };
             let part = flux_engine::file::part_path(&record.destination);
             let work = matches!(record.kind, Kind::Video { .. }).then(|| Manager::video_work(&record));
+            let torrent = matches!(record.kind, Kind::Torrent { .. });
             // A running transfer releases its file a moment after cancelling.
             std::thread::spawn(move || {
                 std::thread::sleep(Duration::from_millis(400));
-                if delete_files { let _ = std::fs::remove_file(&record.destination); }
+                if delete_files {
+                    // A torrent with several files is a folder.
+                    if torrent && record.destination.is_dir() { let _ = std::fs::remove_dir_all(&record.destination); } else { let _ = std::fs::remove_file(&record.destination); }
+                }
+                if torrent && (record.status != Status::Completed || delete_files) {
+                    let mut control = record.destination.clone().into_os_string();
+                    control.push(".aria2");
+                    let _ = std::fs::remove_file(control);
+                }
                 if record.status != Status::Completed || delete_files { let _ = std::fs::remove_file(part); }
                 if let Some(work) = work.filter(|_| record.status != Status::Completed || delete_files) { let _ = std::fs::remove_dir_all(work); }
             });
@@ -645,6 +767,9 @@ impl Manager {
         let record = self.record(id).ok_or("Unknown download.")?;
         if self.live.lock().unwrap().contains_key(id) {
             return Err("Stop the download before renaming it.".into());
+        }
+        if matches!(record.kind, Kind::Torrent { .. }) {
+            return Err("A torrent keeps the name its files were shared under.".into());
         }
         let name = flux_engine::sanitize_file_name(name);
         let folder = record.destination.parent().unwrap_or(Path::new("")).to_path_buf();
@@ -664,6 +789,10 @@ impl Manager {
     pub fn redownload(self: &Arc<Self>, id: &str) -> Result<String, String> {
         let record = self.record(id).ok_or("Unknown download.")?;
         let name = record.name();
+        if let Kind::Torrent { selection } = record.kind {
+            let folder = record.destination.parent().map(|p| p.to_string_lossy().into_owned());
+            return self.add(AddRequest { url: record.url, folder, start: Some("now".into()), torrent: Some(selection), ..Default::default() });
+        }
         let video = match record.kind { Kind::Video { mut selection } => { selection.impersonate = false; Some(selection) } _ => None };
         self.add(AddRequest { url: record.url, file_name: Some(name), session: record.session, start: Some("now".into()), video, ..Default::default() })
     }

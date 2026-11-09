@@ -46,6 +46,7 @@
         <dt>Time left</dt><dd>{timeLeft(d)}</dd>
         <dt>Resume capability</dt>
         {#if d.kind === "video"}<dd class="good">Yes: video parts are kept while paused</dd>
+        {:else if d.kind === "torrent"}<dd class="good">Yes: a torrent continues where it stopped</dd>
         {:else}<dd class={d.resumable ? "good" : "warn"}>{d.total == null && !d.resumable ? "Unknown until the server answers" : d.resumable ? "Yes" : "No: this server does not allow resuming"}</dd>{/if}
       </dl>
       <div class="track" aria-label="Progress"><i style:width="{percent(d)}%"></i></div>
@@ -55,7 +56,7 @@
       {/if}
       {#if d.note}<p class="note">{d.note}</p>{/if}
 
-      {#if details && d.kind !== "video"}
+      {#if details && d.kind === "file"}
         <div class="map" aria-label="Parts of the file">
           {#each parts as p}<span class="part" style:left="{p.left}%" style:width="{p.width}%"><i style:width="{p.fill}%"></i></span>{/each}
         </div>

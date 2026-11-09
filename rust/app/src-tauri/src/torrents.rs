@@ -1,7 +1,16 @@
-//! Torrents (M5).
+//! Magnet links from the browser.
 use flux_ipc::Response;
 use tauri::AppHandle;
 
-pub fn offer_magnet(_app: &AppHandle, _magnet: &str) -> Response {
-    Response::error("Torrents arrive in a later Flux 2.0 build.")
+use crate::{PendingRequest, offer};
+
+/// Opens the torrent window for a magnet link; the browser only needs to know it was taken.
+pub async fn offer_magnet(app: &AppHandle, magnet: &str) -> Response {
+    let app = app.clone();
+    let pending = PendingRequest { url: magnet.to_string(), ..Default::default() };
+    match tauri::async_runtime::spawn(async move { offer(&app, pending, false) }).await {
+        Ok(Ok(_)) => Response::ok(),
+        Ok(Err(error)) => Response::error(error),
+        Err(error) => Response::error(error.to_string()),
+    }
 }

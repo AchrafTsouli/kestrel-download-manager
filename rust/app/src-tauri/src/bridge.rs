@@ -69,7 +69,7 @@ async fn handle(app: &AppHandle, request: Request) -> Response {
         "download" => {
             let url = request.url.clone().unwrap_or_default();
             if flux_ipc::is_magnet(&url) {
-                return crate::torrents::offer_magnet(app, &url);
+                return crate::torrents::offer_magnet(app, &url).await;
             }
             if request.video.is_some() {
                 return crate::media::download(app, &request).await;

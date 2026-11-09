@@ -30,6 +30,7 @@ flux-engine.workspace = true
 flux-store.workspace = true
 flux-ipc.workspace = true
 flux-media.workspace = true
+flux-torrent.workspace = true
 arboard = { version = "3", default-features = false }
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 

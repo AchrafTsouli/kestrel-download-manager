@@ -16,6 +16,7 @@ flux-engine = { path = "crates/flux-engine" }
 flux-store = { path = "crates/flux-store" }
 flux-ipc = { path = "crates/flux-ipc" }
 flux-media = { path = "crates/flux-media" }
+flux-torrent = { path = "crates/flux-torrent" }
 labserver = { path = "tools/labserver" }
 
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "fs", "io-util", "net", "signal"] }
@@ -32,6 +33,8 @@ thiserror = "2"
 tracing = "0.1"
 url = "2"
 sha2 = "0.10"
+sha1 = "0.10"
+getrandom = "0.2"
 regex = "1"
 rusqlite = { version = "0.32", features = ["bundled"] }
 

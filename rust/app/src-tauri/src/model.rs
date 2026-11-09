@@ -34,7 +34,8 @@ pub enum Kind {
     Http,
     /// A video page fetched with yt-dlp; the selection is the quality (and clip) chosen.
     Video { selection: flux_media::Selection },
-    Torrent { selection: serde_json::Value },
+    /// A torrent through aria2; the selection names its saved file list and the chosen files.
+    Torrent { selection: flux_torrent::Selection },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

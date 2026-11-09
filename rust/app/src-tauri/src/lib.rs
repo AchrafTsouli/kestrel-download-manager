@@ -27,6 +27,9 @@ pub struct Pending {
     /// What the video picker found (kept so the choice is checked against it).
     #[serde(skip)]
     pub video: Option<flux_media::Probe>,
+    /// The torrent's file list, once read.
+    #[serde(skip)]
+    pub torrent: Option<flux_torrent::Info>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -83,6 +86,13 @@ pub fn open_complete(app: &AppHandle, id: &str) {
 fn open_start(app: &AppHandle, pending_id: &str) {
     open_window(app, &format!("start-{pending_id}"), "Download file info", 600.0, 340.0, false);
 }
+fn open_torrent(app: &AppHandle, pending_id: &str) {
+    open_window(app, &format!("torrent-{pending_id}"), "Download torrent", 640.0, 560.0, true);
+}
+/// A magnet link or a .torrent file on this computer.
+fn is_torrent_source(text: &str) -> bool {
+    flux_torrent::magnet_hash(text).is_some() || text.to_ascii_lowercase().ends_with(".torrent") && std::path::Path::new(text).is_file()
+}
 fn open_video(app: &AppHandle, pending_id: &str) {
     open_window(app, &format!("video-{pending_id}"), "Download video", 640.0, 560.0, true);
 }
@@ -101,10 +111,20 @@ fn show_main(app: &AppHandle) {
 /// A link to add: either straight in, or through the start dialog when that is enabled.
 pub fn offer(app: &AppHandle, request: PendingRequest, force_dialog: bool) -> Result<Option<String>, String> {
     let manager = app.state::<Shared>().inner().clone();
+    // Torrents open their file list.
+    if is_torrent_source(&request.url) {
+        if !manager.torrents.available() {
+            return Err("The torrent engine is missing from this installation. Reinstall Flux to restore it.".into());
+        }
+        let pending_id = pending_id();
+        app.state::<Windows>().pending.lock().unwrap().insert(pending_id.clone(), Pending { id: pending_id.clone(), request, probe: None, video: None, torrent: None });
+        open_torrent(app, &pending_id);
+        return Ok(None);
+    }
     // A video page without a chosen quality opens the quality list first.
     if request.video.is_none() && !request.as_file && manager.media.available() && flux_media::pages::is_known_video_page(&request.url) {
         let pending_id = pending_id();
-        app.state::<Windows>().pending.lock().unwrap().insert(pending_id.clone(), Pending { id: pending_id.clone(), request, probe: None, video: None });
+        app.state::<Windows>().pending.lock().unwrap().insert(pending_id.clone(), Pending { id: pending_id.clone(), request, probe: None, video: None, torrent: None });
         open_video(app, &pending_id);
         return Ok(None);
     }
@@ -120,11 +140,11 @@ pub fn offer(app: &AppHandle, request: PendingRequest, force_dialog: bool) -> Re
     if let Some(selection) = &request.video {
         // Nothing to ask the server: the quality list already said what the file will be.
         let probe = video_probe(&manager, &request, selection);
-        app.state::<Windows>().pending.lock().unwrap().insert(pending_id.clone(), Pending { id: pending_id.clone(), request, probe: Some(probe), video: None });
+        app.state::<Windows>().pending.lock().unwrap().insert(pending_id.clone(), Pending { id: pending_id.clone(), request, probe: Some(probe), video: None, torrent: None });
         open_start(app, &pending_id);
         return Ok(None);
     }
-    app.state::<Windows>().pending.lock().unwrap().insert(pending_id.clone(), Pending { id: pending_id.clone(), request: request.clone(), probe: None, video: None });
+    app.state::<Windows>().pending.lock().unwrap().insert(pending_id.clone(), Pending { id: pending_id.clone(), request: request.clone(), probe: None, video: None, torrent: None });
     open_start(app, &pending_id);
     // Ask the server for the real name and size while the dialog opens.
     let app = app.clone();
@@ -178,8 +198,8 @@ fn save_settings(app: AppHandle, manager: Mgr, settings: Settings) -> Result<(),
 #[tauri::command]
 async fn offer_url(app: AppHandle, url: String, file_name: Option<String>) -> Result<Option<String>, String> {
     let url = url.trim().to_string();
-    if !(url.starts_with("http://") || url.starts_with("https://")) {
-        return Err("Enter a full address starting with http:// or https://.".into());
+    if !(url.starts_with("http://") || url.starts_with("https://") || flux_torrent::magnet_hash(&url).is_some()) {
+        return Err("Enter a full address starting with http:// or https://, or a magnet link.".into());
     }
     offer(&app, PendingRequest { url, file_name, ..Default::default() }, false)
 }
@@ -333,6 +353,77 @@ async fn confirm_video(app: AppHandle, manager: Mgr<'_>, windows: State<'_, Wind
     windows.pending.lock().unwrap().remove(&choice.pending_id);
     Ok(offer(&app, request, false)?.unwrap_or_default())
 }
+/// Reads a torrent's file list (from peers, for a magnet link; at most 3 minutes).
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TorrentOffer {
+    info: flux_torrent::Info,
+    folder: String,
+}
+#[tauri::command]
+async fn load_torrent(manager: Mgr<'_>, windows: State<'_, Windows>, id: String) -> Result<TorrentOffer, String> {
+    let source = windows.pending.lock().unwrap().get(&id).map(|p| p.request.url.clone()).ok_or("This download was already added or cancelled.")?;
+    let cancel = tokio_util::sync::CancellationToken::new();
+    let info = match tokio::time::timeout(std::time::Duration::from_secs(180), manager.torrents.load(&source, &cancel)).await {
+        Ok(result) => result?,
+        Err(_) => {
+            cancel.cancel();
+            return Err("No one shared this torrent's file list within 3 minutes. Try again later, or use a .torrent file.".into());
+        }
+    };
+    if let Some(pending) = windows.pending.lock().unwrap().get_mut(&id) {
+        pending.torrent = Some(info.clone());
+    }
+    let folder = manager.settings.read().unwrap().download_dir.join("Torrents").to_string_lossy().into_owned();
+    Ok(TorrentOffer { info, folder })
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct TorrentChoice {
+    pending_id: String,
+    /// 1-based indexes of the chosen files.
+    files: Vec<usize>,
+    folder: String,
+    #[serde(default)]
+    seed_minutes: u32,
+    /// "now" or "later"
+    start: String,
+}
+#[tauri::command]
+async fn confirm_torrent(app: AppHandle, manager: Mgr<'_>, windows: State<'_, Windows>, choice: TorrentChoice) -> Result<String, String> {
+    let pending = windows.pending.lock().unwrap().get(&choice.pending_id).cloned().ok_or("This download was already added or cancelled.")?;
+    let info = pending.torrent.ok_or("The torrent's file list is not ready yet.")?;
+    let chosen: Vec<&flux_torrent::TorrentFile> = info.files.iter().filter(|f| choice.files.contains(&f.index)).collect();
+    if chosen.is_empty() {
+        return Err("Choose at least one file.".into());
+    }
+    if !std::path::Path::new(&choice.folder).is_absolute() {
+        return Err("Choose a folder to save the torrent in.".into());
+    }
+    let selection = flux_torrent::Selection {
+        info_hash: info.info_hash.clone(),
+        name: info.name.clone(),
+        metadata_file: flux_torrent::metadata_path(&manager.torrents.cache, &info.info_hash),
+        // Every file chosen: no list, so aria2 takes the whole torrent.
+        files: if chosen.len() == info.files.len() { Vec::new() } else { chosen.iter().map(|f| f.index).collect() },
+        selected_bytes: chosen.iter().map(|f| f.length).sum(),
+        seed_minutes: choice.seed_minutes.min(1440),
+    };
+    let id = manager.add(AddRequest { url: flux_torrent::magnet(&info.info_hash, &info.name), folder: Some(choice.folder), start: Some(choice.start.clone()), request_id: pending.request.request_id, torrent: Some(selection), ..Default::default() })?;
+    windows.pending.lock().unwrap().remove(&choice.pending_id);
+    if choice.start == "now" && manager.settings.read().unwrap().show_progress_window {
+        open_progress(&app, &id);
+    }
+    Ok(id)
+}
+#[tauri::command]
+async fn open_torrent_file(app: AppHandle, path: String) -> Result<(), String> {
+    if !is_torrent_source(&path) {
+        return Err("Choose a .torrent file.".into());
+    }
+    offer(&app, PendingRequest { url: path, ..Default::default() }, false).map(|_| ())
+}
+
 /// The page is not a video after all: download the address as a file.
 #[tauri::command]
 async fn video_as_file(app: AppHandle, windows: State<'_, Windows>, id: String) -> Result<(), String> {
@@ -546,7 +637,7 @@ pub fn run() {
         .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
             // A second start (or a link passed on the command line) goes to the running Flux.
             show_main(app);
-            if let Some(url) = args.iter().skip(1).find(|a| a.starts_with("http://") || a.starts_with("https://")).cloned() {
+            if let Some(url) = args.iter().skip(1).find(|a| a.starts_with("http://") || a.starts_with("https://") || is_torrent_source(a)).cloned() {
                 // Off the main thread: opening a window from it would wait on itself.
                 let app = app.clone();
                 tauri::async_runtime::spawn(async move { let _ = offer(&app, PendingRequest { url, ..Default::default() }, false); });
@@ -597,7 +688,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             list_downloads, get_download, get_settings, save_settings, offer_url, get_pending, confirm_pending, cancel_pending,
-            probe_video, video_exact_cut, confirm_video, video_as_file,
+            probe_video, video_exact_cut, confirm_video, video_as_file, load_torrent, confirm_torrent, open_torrent_file,
             add_downloads, pause_downloads, resume_downloads, pause_all, resume_all, remove_downloads, remove_completed,
             rename_download, redownload, set_speed_limit, set_queue, enqueue, start_queue, stop_queue, running_queues,
             open_file, show_in_folder, open_folder, show_progress, show_window, power_action, exit_app, app_version
