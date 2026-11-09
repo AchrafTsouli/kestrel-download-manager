@@ -52,6 +52,10 @@ impl HostLimits {
             callback(&host, connections);
         }
     }
+    /// Replaces the remembered limits (the user forgot some in Options).
+    pub fn replace(&self, limits: HashMap<String, usize>) {
+        *self.limits.lock().unwrap() = limits.into_iter().map(|(h, n)| (h.to_ascii_lowercase(), n.max(1))).collect();
+    }
     pub fn snapshot(&self) -> HashMap<String, usize> {
         self.limits.lock().unwrap().clone()
     }

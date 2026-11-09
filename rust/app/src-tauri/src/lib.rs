@@ -1,309 +1,440 @@
-//! Flux 2.0's desktop shell: the main window's commands on top of flux-engine. Queues, settings,
-//! video, torrents and the browser bridge arrive in later milestones (see the 2.0 plan).
+//! Flux 2.0's desktop app: windows, tray, scheduler and commands on top of the download manager.
+
+mod manager;
+mod model;
+mod system;
 
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::sync::Mutex;
 
-use flux_engine::{Engine, Event, HostLimits, Job, Options, Outcome};
-use serde::Serialize;
-use tauri::{AppHandle, Emitter, Manager, State};
-use tokio_util::sync::CancellationToken;
-use url::Url;
+use manager::{AddRequest, Manager, Probe, Shared, now_ms};
+use model::{AfterQueue, Settings, View};
+use serde::{Deserialize, Serialize};
+use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
+use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+use tauri::{AppHandle, Emitter, Listener, Manager as _, State, WebviewUrl, WebviewWindowBuilder, WindowEvent};
 
-#[derive(Clone, Serialize)]
+/// A download waiting in the start dialog ("Download File Info") before it is added.
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct DownloadView {
-    id: String,
-    name: String,
-    url: String,
-    path: String,
+pub struct Pending {
+    pub id: String,
+    pub request: PendingRequest,
+    pub probe: Option<Probe>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PendingRequest {
+    pub url: String,
+    pub file_name: Option<String>,
+    pub description: Option<String>,
+    #[serde(skip_serializing)]
+    pub session: Option<flux_engine::Session>,
+    pub request_id: Option<String>,
+}
+
+#[derive(Default)]
+pub struct Windows {
+    pending: Mutex<HashMap<String, Pending>>,
+}
+
+type Mgr<'a> = State<'a, Shared>;
+
+// ---------------------------------------------------------------------- windows
+
+fn open_window(app: &AppHandle, label: &str, title: &str, width: f64, height: f64, resizable: bool) {
+    if let Some(window) = app.get_webview_window(label) {
+        let _ = window.unminimize();
+        let _ = window.show();
+        let _ = window.set_focus();
+        return;
+    }
+    let built = WebviewWindowBuilder::new(app, label, WebviewUrl::App("index.html".into()))
+        .title(title)
+        .inner_size(width, height)
+        .min_inner_size(width.min(360.0), height.min(200.0))
+        .resizable(resizable)
+        .center()
+        .focused(true)
+        .build();
+    if let Err(error) = built {
+        let _ = app.emit("message", format!("A window could not open: {error}"));
+    }
+}
+
+pub fn open_progress(app: &AppHandle, id: &str) {
+    open_window(app, &format!("progress-{id}"), "Download progress", 560.0, 440.0, true);
+}
+pub fn open_complete(app: &AppHandle, id: &str) {
+    open_window(app, &format!("complete-{id}"), "Download complete", 520.0, 300.0, false);
+}
+fn open_start(app: &AppHandle, pending_id: &str) {
+    open_window(app, &format!("start-{pending_id}"), "Download file info", 600.0, 340.0, false);
+}
+fn show_main(app: &AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.unminimize();
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
+}
+
+/// A link to add: either straight in, or through the start dialog when that is enabled.
+pub fn offer(app: &AppHandle, request: PendingRequest, force_dialog: bool) -> Result<Option<String>, String> {
+    let manager = app.state::<Shared>().inner().clone();
+    let show_dialog = force_dialog || manager.settings.read().unwrap().show_start_dialog;
+    if !show_dialog {
+        let id = manager.add(AddRequest { url: request.url, file_name: request.file_name, description: request.description, session: request.session, request_id: request.request_id, start: Some("now".into()), ..Default::default() })?;
+        if manager.settings.read().unwrap().show_progress_window {
+            open_progress(app, &id);
+        }
+        return Ok(Some(id));
+    }
+    let pending_id = format!("{:x}", now_ms() ^ (std::process::id() as u64) << 20);
+    app.state::<Windows>().pending.lock().unwrap().insert(pending_id.clone(), Pending { id: pending_id.clone(), request: request.clone(), probe: None });
+    open_start(app, &pending_id);
+    // Ask the server for the real name and size while the dialog opens.
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let probe = manager.probe(&request.url, request.session.clone(), request.file_name.clone()).await;
+        if let Some(pending) = app.state::<Windows>().pending.lock().unwrap().get_mut(&pending_id) {
+            pending.probe = Some(probe.clone());
+        }
+        let _ = app.emit("probe", (pending_id, probe));
+    });
+    Ok(None)
+}
+
+// ---------------------------------------------------------------------- commands
+
+#[tauri::command]
+fn list_downloads(manager: Mgr) -> Vec<View> {
+    manager.views()
+}
+#[tauri::command]
+fn get_download(manager: Mgr, id: String) -> Option<View> {
+    manager.view(&id)
+}
+#[tauri::command]
+fn get_settings(manager: Mgr) -> Settings {
+    manager.settings()
+}
+#[tauri::command]
+fn save_settings(app: AppHandle, manager: Mgr, settings: Settings) -> Result<(), String> {
+    system::set_autostart(settings.start_with_windows);
+    manager.save_settings(settings)?;
+    let _ = app.emit("message", "Options saved.");
+    Ok(())
+}
+#[tauri::command]
+async fn offer_url(app: AppHandle, url: String, file_name: Option<String>) -> Result<Option<String>, String> {
+    let url = url.trim().to_string();
+    if !(url.starts_with("http://") || url.starts_with("https://")) {
+        return Err("Enter a full address starting with http:// or https://.".into());
+    }
+    offer(&app, PendingRequest { url, file_name, ..Default::default() }, false)
+}
+#[tauri::command]
+fn get_pending(windows: State<'_, Windows>, id: String) -> Option<Pending> {
+    windows.pending.lock().unwrap().get(&id).cloned()
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct StartChoice {
+    pending_id: String,
+    file_name: String,
+    folder: String,
     category: String,
     description: String,
-    status: String,
-    written: u64,
-    total: Option<u64>,
-    bytes_per_second: f64,
-    connections: usize,
-    added_ms: u64,
-    last_try_ms: Option<u64>,
-    error: Option<String>,
+    /// "now", "later" or "queue"
+    start: String,
+    queue: Option<String>,
 }
-
-struct Entry {
-    job: Job,
-    view: DownloadView,
-    cancel: Option<CancellationToken>,
-}
-
-struct AppState {
-    engine: Engine,
-    downloads: Mutex<HashMap<String, Arc<Mutex<Entry>>>>,
-    order: Mutex<Vec<String>>,
-}
-
-fn now_ms() -> u64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
-}
-
-fn emit(app: &AppHandle, view: &DownloadView) {
-    let _ = app.emit("download", view.clone());
-}
-
-/// The category a file belongs to, from its extension (same groups as Flux 1.x).
-fn category_for(name: &str) -> &'static str {
-    let ext = Path::new(name).extension().map(|e| e.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
-    match ext.as_str() {
-        "zip" | "rar" | "7z" | "tar" | "gz" | "bz2" | "xz" | "zst" | "iso" | "cab" | "arj" | "lzh" => "Compressed",
-        "pdf" | "doc" | "docx" | "xls" | "xlsx" | "ppt" | "pptx" | "txt" | "rtf" | "odt" | "ods" | "epub" | "csv" => "Documents",
-        "mp3" | "flac" | "wav" | "m4a" | "aac" | "ogg" | "opus" | "wma" => "Music",
-        "exe" | "msi" | "msix" | "appx" | "dmg" | "pkg" | "deb" | "rpm" | "apk" | "bat" | "appimage" => "Programs",
-        "mp4" | "mkv" | "webm" | "avi" | "mov" | "wmv" | "flv" | "m4v" | "ts" | "3gp" => "Video",
-        "jpg" | "jpeg" | "png" | "gif" | "webp" | "bmp" | "svg" | "tif" | "tiff" | "heic" | "ico" => "Images",
-        _ => "Other",
-    }
-}
-
-fn unique_destination(folder: &Path, name: &str) -> PathBuf {
-    let path = folder.join(name);
-    if !path.exists() {
-        return path;
-    }
-    let stem = Path::new(name).file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
-    let ext = Path::new(name).extension().map(|e| format!(".{}", e.to_string_lossy())).unwrap_or_default();
-    (1..).map(|n| folder.join(format!("{stem} ({n}){ext}"))).find(|p| !p.exists()).unwrap()
-}
-
-fn entry(state: &AppState, id: &str) -> Option<Arc<Mutex<Entry>>> {
-    state.downloads.lock().unwrap().get(id).cloned()
-}
-
 #[tauri::command]
-fn list_downloads(state: State<'_, Arc<AppState>>) -> Vec<DownloadView> {
-    let downloads = state.downloads.lock().unwrap();
-    state.order.lock().unwrap().iter().filter_map(|id| downloads.get(id)).map(|e| e.lock().unwrap().view.clone()).collect()
-}
-
-#[tauri::command]
-fn add_download(app: AppHandle, state: State<'_, Arc<AppState>>, url: String, start_now: Option<bool>) -> Result<String, String> {
-    let url = Url::parse(url.trim()).map_err(|_| "Enter a full address starting with http:// or https://.".to_string())?;
-    if !matches!(url.scheme(), "http" | "https") || !url.username().is_empty() {
-        return Err("Only HTTP and HTTPS links without a user name in them are supported.".into());
-    }
-    let raw = url.path_segments().and_then(|mut s| s.next_back()).unwrap_or("");
-    let name = flux_engine::sanitize_file_name(&url_decode(raw));
-    let name = if name.contains('.') { name } else { "download.bin".to_string() };
-    let category = category_for(&name);
-    let base = app.path().download_dir().map_err(|e| e.to_string())?;
-    let folder = if category == "Other" { base } else { base.join(category) };
-    std::fs::create_dir_all(&folder).map_err(|e| e.to_string())?;
-    let destination = unique_destination(&folder, &name);
-    let id = format!("{:x}", SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos());
-    let view = DownloadView {
-        id: id.clone(),
-        name: destination.file_name().unwrap().to_string_lossy().into(),
-        url: url.to_string(),
-        path: destination.to_string_lossy().into(),
-        category: category.into(),
-        description: url.host_str().unwrap_or_default().trim_start_matches("www.").to_string(),
-        status: "Queued".into(),
-        written: 0,
-        total: None,
-        bytes_per_second: 0.0,
-        connections: 0,
-        added_ms: now_ms(),
-        last_try_ms: None,
-        error: None,
-    };
-    let entry = Arc::new(Mutex::new(Entry { job: Job::new(url, destination), view: view.clone(), cancel: None }));
-    state.downloads.lock().unwrap().insert(id.clone(), entry.clone());
-    state.order.lock().unwrap().push(id.clone());
-    emit(&app, &view);
-    if start_now.unwrap_or(true) {
-        start(app, state.inner().clone(), entry);
-    } else {
-        let mut e = entry.lock().unwrap();
-        e.view.status = "Paused".into();
-        emit(&app, &e.view);
+async fn confirm_pending(app: AppHandle, manager: Mgr<'_>, windows: State<'_, Windows>, choice: StartChoice) -> Result<String, String> {
+    let pending = windows.pending.lock().unwrap().get(&choice.pending_id).cloned().ok_or("This download was already added or cancelled.")?;
+    let start = if choice.start == "queue" { "queue".to_string() } else { choice.start.clone() };
+    let id = manager.add(AddRequest {
+        url: pending.request.url,
+        file_name: Some(choice.file_name),
+        folder: Some(choice.folder),
+        category: Some(choice.category),
+        description: Some(choice.description),
+        start: Some(start.clone()),
+        queue: choice.queue,
+        session: pending.request.session,
+        request_id: pending.request.request_id,
+        total: pending.probe.and_then(|p| p.total),
+        ..Default::default()
+    })?;
+    windows.pending.lock().unwrap().remove(&choice.pending_id);
+    if start == "now" && manager.settings.read().unwrap().show_progress_window {
+        open_progress(&app, &id);
     }
     Ok(id)
 }
-
 #[tauri::command]
-fn pause_downloads(state: State<'_, Arc<AppState>>, ids: Vec<String>) {
-    for id in ids {
-        if let Some(entry) = entry(&state, &id) {
-            if let Some(cancel) = entry.lock().unwrap().cancel.take() {
-                cancel.cancel();
-            }
-        }
-    }
+fn cancel_pending(windows: State<'_, Windows>, id: String) {
+    windows.pending.lock().unwrap().remove(&id);
 }
-
 #[tauri::command]
-fn resume_downloads(app: AppHandle, state: State<'_, Arc<AppState>>, ids: Vec<String>) {
-    for id in ids {
-        if let Some(entry) = entry(&state, &id) {
-            let idle = { let e = entry.lock().unwrap(); e.cancel.is_none() && e.view.status != "Completed" };
-            if idle {
-                start(app.clone(), state.inner().clone(), entry);
-            }
-        }
-    }
+fn add_downloads(manager: Mgr, urls: Vec<String>, start: String) -> Vec<Result<String, String>> {
+    urls.into_iter().map(|url| manager.add(AddRequest { url, start: Some(start.clone()), ..Default::default() })).collect()
 }
-
 #[tauri::command]
-fn pause_all(state: State<'_, Arc<AppState>>) {
-    for entry in state.downloads.lock().unwrap().values() {
-        if let Some(cancel) = entry.lock().unwrap().cancel.take() {
-            cancel.cancel();
-        }
-    }
+fn pause_downloads(manager: Mgr, ids: Vec<String>) {
+    manager.pause(&ids)
 }
-
-/// Removes downloads from the list. Running ones are stopped first; `delete_files` also deletes the
-/// finished file or the partial file from disk.
 #[tauri::command]
-fn remove_downloads(app: AppHandle, state: State<'_, Arc<AppState>>, ids: Vec<String>, delete_files: bool) -> Vec<String> {
-    let mut removed = Vec::new();
-    for id in ids {
-        let Some(entry) = state.downloads.lock().unwrap().remove(&id) else { continue };
-        let e = entry.lock().unwrap();
-        if let Some(cancel) = &e.cancel {
-            cancel.cancel();
-        }
-        let part = flux_engine::file::part_path(&e.job.destination);
-        if delete_files {
-            let _ = std::fs::remove_file(&e.job.destination);
-        }
-        if e.view.status != "Completed" || delete_files {
-            let _ = std::fs::remove_file(part);
-        }
-        removed.push(id.clone());
-    }
-    state.order.lock().unwrap().retain(|id| !removed.contains(id));
-    let _ = app.emit("removed", removed.clone());
-    removed
+fn resume_downloads(manager: Mgr, ids: Vec<String>) {
+    manager.resume(&ids)
 }
-
 #[tauri::command]
-fn remove_completed(app: AppHandle, state: State<'_, Arc<AppState>>) -> Vec<String> {
-    let ids: Vec<String> = state.downloads.lock().unwrap().iter().filter(|(_, e)| e.lock().unwrap().view.status == "Completed").map(|(id, _)| id.clone()).collect();
-    remove_downloads(app, state, ids, false)
+fn pause_all(manager: Mgr) {
+    manager.pause_all()
 }
-
 #[tauri::command]
-fn open_file(state: State<'_, Arc<AppState>>, id: String) -> Result<(), String> {
-    let path = entry(&state, &id).map(|e| e.lock().unwrap().job.destination.clone()).ok_or("Unknown download.")?;
-    if !path.exists() {
+fn resume_all(manager: Mgr) {
+    manager.resume_all()
+}
+#[tauri::command]
+fn remove_downloads(manager: Mgr, ids: Vec<String>, delete_files: bool) -> Vec<String> {
+    manager.remove(&ids, delete_files)
+}
+#[tauri::command]
+fn remove_completed(manager: Mgr) -> Vec<String> {
+    manager.remove_completed()
+}
+#[tauri::command]
+fn rename_download(manager: Mgr, id: String, name: String) -> Result<(), String> {
+    manager.rename(&id, &name)
+}
+#[tauri::command]
+fn redownload(manager: Mgr, id: String) -> Result<String, String> {
+    manager.redownload(&id)
+}
+#[tauri::command]
+fn set_speed_limit(manager: Mgr, id: String, bytes_per_second: u64) {
+    manager.set_speed_limit(&id, bytes_per_second)
+}
+#[tauri::command]
+fn set_queue(manager: Mgr, ids: Vec<String>, queue: String) {
+    manager.set_queue(&ids, &queue)
+}
+#[tauri::command]
+fn enqueue(manager: Mgr, ids: Vec<String>) {
+    manager.enqueue(&ids)
+}
+#[tauri::command]
+fn start_queue(manager: Mgr, name: String) {
+    manager.start_queue(&name)
+}
+#[tauri::command]
+fn stop_queue(manager: Mgr, name: String) {
+    manager.stop_queue(&name)
+}
+#[tauri::command]
+fn running_queues(manager: Mgr) -> Vec<String> {
+    manager.running_queues.lock().unwrap().iter().cloned().collect()
+}
+#[tauri::command]
+fn open_file(manager: Mgr, id: String) -> Result<(), String> {
+    let record = manager.record(&id).ok_or("Unknown download.")?;
+    if !record.destination.exists() {
         return Err("The file is no longer there.".into());
     }
-    #[cfg(windows)]
-    std::process::Command::new("cmd").args(["/C", "start", ""]).arg(&path).spawn().map_err(|e| e.to_string())?;
-    #[cfg(not(windows))]
-    std::process::Command::new(if cfg!(target_os = "macos") { "open" } else { "xdg-open" }).arg(&path).spawn().map_err(|e| e.to_string())?;
-    Ok(())
+    system::open_path(&record.destination)
 }
-
 #[tauri::command]
-fn show_in_folder(state: State<'_, Arc<AppState>>, id: String) -> Result<(), String> {
-    let path = entry(&state, &id).map(|e| e.lock().unwrap().job.destination.clone()).ok_or("Unknown download.")?;
-    #[cfg(windows)]
-    {
-        let target = if path.exists() { path } else { path.parent().map(Path::to_path_buf).unwrap_or(path) };
-        std::process::Command::new("explorer").arg(format!("/select,{}", target.display())).spawn().map_err(|e| e.to_string())?;
-    }
-    #[cfg(not(windows))]
-    std::process::Command::new(if cfg!(target_os = "macos") { "open" } else { "xdg-open" }).arg(path.parent().unwrap_or(&path)).spawn().map_err(|e| e.to_string())?;
+fn show_in_folder(manager: Mgr, id: String) -> Result<(), String> {
+    let record = manager.record(&id).ok_or("Unknown download.")?;
+    system::reveal(&record.destination)
+}
+#[tauri::command]
+fn open_folder(path: String) -> Result<(), String> {
+    system::open_path(std::path::Path::new(&path))
+}
+#[tauri::command]
+async fn show_progress(app: AppHandle, id: String) -> Result<(), String> {
+    open_progress(&app, &id);
     Ok(())
 }
+#[tauri::command]
+async fn show_window(app: AppHandle, name: String) -> Result<(), String> {
+    match name.as_str() {
+        "options" => open_window(&app, "options", "Options", 640.0, 520.0, true),
+        "scheduler" => open_window(&app, "scheduler", "Scheduler", 680.0, 500.0, true),
+        "batch" => open_window(&app, "batch", "Add batch download", 560.0, 420.0, true),
+        _ => show_main(&app),
+    }
+    Ok(())
+}
+#[tauri::command]
+fn power_action(app: AppHandle, action: AfterQueue) -> Result<(), String> {
+    if action == AfterQueue::Exit {
+        app.state::<Shared>().shutdown();
+        app.exit(0);
+        return Ok(());
+    }
+    app.state::<Shared>().shutdown();
+    system::power(action)
+}
+#[tauri::command]
+fn exit_app(app: AppHandle) {
+    app.state::<Shared>().shutdown();
+    app.exit(0);
+}
+#[tauri::command]
+fn app_version(app: AppHandle) -> String {
+    app.package_info().version.to_string()
+}
 
-fn start(app: AppHandle, state: Arc<AppState>, entry: Arc<Mutex<Entry>>) {
-    let cancel = CancellationToken::new();
-    let mut job = {
-        let mut e = entry.lock().unwrap();
-        e.cancel = Some(cancel.clone());
-        e.view.status = "Connecting".into();
-        e.view.error = None;
-        e.view.last_try_ms = Some(now_ms());
-        emit(&app, &e.view);
-        e.job.clone()
-    };
+// ---------------------------------------------------------------------- background work
+
+/// Starts and stops queues at their scheduled times (checked every 20 seconds).
+fn scheduler(app: AppHandle) {
     tauri::async_runtime::spawn(async move {
-        let (events_app, events_entry) = (app.clone(), entry.clone());
-        let result = state
-            .engine
-            .download(&mut job, move |event| {
-                let mut e = events_entry.lock().unwrap();
-                match event {
-                    Event::Probed(p) => {
-                        e.view.total = p.total;
-                        e.view.status = "Downloading".into();
-                    }
-                    Event::Progress { written, total, bytes_per_second, connections } => {
-                        e.view.written = written;
-                        e.view.total = total;
-                        e.view.bytes_per_second = bytes_per_second;
-                        e.view.connections = connections;
-                    }
-                    Event::Checkpoint(resume) => e.job.resume = resume,
-                    Event::Retrying { delay, error, .. } => {
-                        e.view.status = format!("Retrying in {}s", delay.as_secs().max(1));
-                        e.view.error = Some(error.message);
-                    }
-                    Event::Note(_) => {}
+        let mut fired: std::collections::HashSet<String> = Default::default();
+        loop {
+            tokio::time::sleep(std::time::Duration::from_secs(20)).await;
+            let manager = app.state::<Shared>().inner().clone();
+            let (day, now) = system::local_time();
+            let stamp = format!("{day}-{now}");
+            for queue in manager.settings.read().unwrap().queues.clone() {
+                if !queue.schedule_enabled || !(queue.days.is_empty() || queue.days.contains(&day)) {
+                    continue;
                 }
-                emit(&events_app, &e.view);
-            }, cancel)
-            .await;
-        let mut e = entry.lock().unwrap();
-        e.job.resume = job.resume.clone();
-        e.job.session = job.session.clone();
-        e.cancel = None;
-        e.view.bytes_per_second = 0.0;
-        e.view.connections = 0;
-        match result {
-            Ok(Outcome::Completed { bytes, .. }) => {
-                e.view.status = "Completed".into();
-                e.view.written = bytes;
-                e.view.total = Some(bytes);
-                e.view.error = None;
+                if queue.start_time.as_deref() == Some(now.as_str()) && fired.insert(format!("{stamp}-start-{}", queue.name)) {
+                    manager.start_queue(&queue.name);
+                    let _ = app.emit("message", format!("{} started on schedule.", queue.name));
+                }
+                if queue.stop_time.as_deref() == Some(now.as_str()) && fired.insert(format!("{stamp}-stop-{}", queue.name)) {
+                    manager.stop_queue(&queue.name);
+                    let _ = app.emit("message", format!("{} stopped on schedule.", queue.name));
+                }
             }
-            Ok(Outcome::Paused) => e.view.status = "Paused".into(),
-            Err(error) => {
-                e.view.status = "Failed".into();
-                e.view.error = Some(error.message);
+            if fired.len() > 500 {
+                fired.clear();
             }
         }
-        emit(&app, &e.view);
     });
 }
 
-fn url_decode(text: &str) -> String {
-    let bytes = text.as_bytes();
-    let mut out = Vec::with_capacity(bytes.len());
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i] == b'%' && i + 2 < bytes.len() {
-            if let Ok(b) = u8::from_str_radix(&text[i + 1..i + 3], 16) {
-                out.push(b);
-                i += 3;
+/// Offers download links copied to the clipboard (when enabled in Options).
+fn clipboard_monitor(app: AppHandle) {
+    std::thread::spawn(move || {
+        let mut last = String::new();
+        let mut clipboard = arboard::Clipboard::new().ok();
+        loop {
+            std::thread::sleep(std::time::Duration::from_millis(1500));
+            let manager = app.state::<Shared>().inner().clone();
+            let settings = manager.settings.read().unwrap().clone();
+            if !settings.monitor_clipboard {
                 continue;
             }
+            let Some(text) = clipboard.as_mut().and_then(|c| c.get_text().ok()).map(|t| t.trim().to_string()) else { continue };
+            if text == last || text.len() > 4096 {
+                continue;
+            }
+            last = text.clone();
+            let Ok(url) = url::Url::parse(&text) else { continue };
+            let ext = std::path::Path::new(url.path()).extension().map(|e| e.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
+            let wanted = !ext.is_empty() && settings.capture_extensions.split_whitespace().any(|e| e.trim_start_matches('.').eq_ignore_ascii_case(&ext));
+            if matches!(url.scheme(), "http" | "https") && wanted && !manager.views().iter().any(|v| v.url == text) {
+                let _ = offer(&app, PendingRequest { url: text, ..Default::default() }, true);
+            }
         }
-        out.push(bytes[i]);
-        i += 1;
-    }
-    String::from_utf8_lossy(&out).into_owned()
+    });
+}
+
+fn tray(app: &AppHandle) -> tauri::Result<()> {
+    let show = MenuItem::with_id(app, "show", "Open Flux", true, None::<&str>)?;
+    let add = MenuItem::with_id(app, "add", "Add URL…", true, None::<&str>)?;
+    let pause = MenuItem::with_id(app, "pause", "Pause all", true, None::<&str>)?;
+    let resume = MenuItem::with_id(app, "resume", "Resume all", true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, "quit", "Exit", true, None::<&str>)?;
+    let menu = Menu::with_items(app, &[&show, &add, &PredefinedMenuItem::separator(app)?, &pause, &resume, &PredefinedMenuItem::separator(app)?, &quit])?;
+    TrayIconBuilder::with_id("flux")
+        .icon(app.default_window_icon().cloned().expect("app icon"))
+        .tooltip("Flux")
+        .menu(&menu)
+        .show_menu_on_left_click(false)
+        .on_menu_event(|app, event| match event.id.as_ref() {
+            "show" => show_main(app),
+            "add" => { show_main(app); let _ = app.emit("open-add", ()); }
+            "pause" => app.state::<Shared>().pause_all(),
+            "resume" => app.state::<Shared>().resume_all(),
+            "quit" => { app.state::<Shared>().shutdown(); app.exit(0); }
+            _ => {}
+        })
+        .on_tray_icon_event(|tray, event| {
+            if let TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, .. } = event {
+                show_main(tray.app_handle());
+            }
+        })
+        .build(app)?;
+    Ok(())
 }
 
 pub fn run() {
-    let state = Arc::new(AppState { engine: Engine::new(Options::default(), HostLimits::new([])), downloads: Mutex::new(HashMap::new()), order: Mutex::new(Vec::new()) });
     tauri::Builder::default()
-        .manage(state)
+        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+            // A second start (or a link passed on the command line) goes to the running Flux.
+            show_main(app);
+            if let Some(url) = args.iter().skip(1).find(|a| a.starts_with("http://") || a.starts_with("https://")).cloned() {
+                // Off the main thread: opening a window from it would wait on itself.
+                let app = app.clone();
+                tauri::async_runtime::spawn(async move { let _ = offer(&app, PendingRequest { url, ..Default::default() }, false); });
+            }
+        }))
+        .plugin(tauri_plugin_dialog::init())
+        .manage(Windows::default())
+        .setup(|app| {
+            let handle = app.handle().clone();
+            let data_dir = flux_store::default_directory();
+            let manager = Manager::open(handle.clone(), &data_dir).map_err(|e| Box::<dyn std::error::Error>::from(e))?;
+            app.manage(manager.clone());
+            // Learned per-site connection limits are kept with the settings.
+            let saver = manager.clone();
+            handle.listen("host-limit", move |_| { let _ = saver.save_settings(saver.settings()); });
+            // Completion: sound, and the "Download complete" window when enabled.
+            let completer = handle.clone();
+            handle.listen("completed", move |event| {
+                let id: String = serde_json::from_str(event.payload()).unwrap_or_default();
+                let manager = completer.state::<Shared>();
+                let settings = manager.settings.read().unwrap().clone();
+                if let Some(window) = completer.get_webview_window(&format!("progress-{id}")) { let _ = window.close(); }
+                if settings.play_sounds { system::sound(true); }
+                if settings.show_complete_dialog { open_complete(&completer, &id); }
+            });
+            tray(&handle)?;
+            scheduler(handle.clone());
+            clipboard_monitor(handle.clone());
+            if std::env::args().any(|a| a == "--background") {
+                if let Some(window) = handle.get_webview_window("main") { let _ = window.hide(); }
+            }
+            Ok(())
+        })
+        .on_window_event(|window, event| {
+            if let WindowEvent::CloseRequested { api, .. } = event {
+                if window.label() == "main" {
+                    let manager = window.app_handle().state::<Shared>();
+                    if manager.settings.read().unwrap().minimize_to_tray {
+                        api.prevent_close();
+                        let _ = window.hide();
+                    } else {
+                        manager.shutdown();
+                        window.app_handle().exit(0);
+                    }
+                }
+            }
+        })
         .invoke_handler(tauri::generate_handler![
-            list_downloads, add_download, pause_downloads, resume_downloads, pause_all, remove_downloads, remove_completed, open_file, show_in_folder
+            list_downloads, get_download, get_settings, save_settings, offer_url, get_pending, confirm_pending, cancel_pending,
+            add_downloads, pause_downloads, resume_downloads, pause_all, resume_all, remove_downloads, remove_completed,
+            rename_download, redownload, set_speed_limit, set_queue, enqueue, start_queue, stop_queue, running_queues,
+            open_file, show_in_folder, open_folder, show_progress, show_window, power_action, exit_app, app_version
         ])
         .run(tauri::generate_context!())
         .expect("Flux could not start");

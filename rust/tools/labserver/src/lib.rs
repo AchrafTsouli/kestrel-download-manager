@@ -173,6 +173,14 @@ async fn handle(shared: Arc<Shared>, request: Request<hyper::body::Incoming>) ->
         state.refused.fetch_add(1, Ordering::SeqCst);
         return Ok(text(StatusCode::FORBIDDEN, "browsers only"));
     }
+    // A Cloudflare-style bot check: a browser identity from a non-browser client is challenged.
+    if number("bot_check", 0) == 1 && request.headers().get("user-agent").and_then(|v| v.to_str().ok()).is_some_and(|ua| ua.contains("Mozilla")) {
+        state.refused.fetch_add(1, Ordering::SeqCst);
+        let mut challenge = text(StatusCode::FORBIDDEN, "Just a moment...");
+        challenge.headers_mut().insert("cf-mitigated", HeaderValue::from_static("challenge"));
+        challenge.headers_mut().insert(header::SERVER, HeaderValue::from_static("cloudflare"));
+        return Ok(challenge);
+    }
     if number("html", 0) == 1 {
         let mut page = text(StatusCode::OK, "<html><body>sign in</body></html>");
         page.headers_mut().insert(header::CONTENT_TYPE, HeaderValue::from_static("text/html; charset=utf-8"));

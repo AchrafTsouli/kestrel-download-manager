@@ -34,7 +34,15 @@ pub use limits::{HostLimits, Limiter};
 pub use plan::{Plan, Segment};
 pub use session::{Cookie, Header, Session};
 
-pub const DEFAULT_USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
+/// Used when a bot check refuses the browser identity (see `probe`).
+pub const HONEST_USER_AGENT: &str = concat!("Flux/", env!("CARGO_PKG_VERSION"), " (+https://github.com/AchrafTsouli/flux-downloader)");
+
+fn is_bot_challenge(response: &reqwest::Response) -> bool {
+    let headers = response.headers();
+    headers.contains_key("cf-mitigated") || headers.get(header::SERVER).and_then(|v| v.to_str().ok()).is_some_and(|s| s.eq_ignore_ascii_case("cloudflare"))
+}
+
+pub const DEFAULT_USER_AGENT: &str ="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 
 #[derive(Debug, Clone)]
 pub struct Options {
@@ -215,6 +223,18 @@ impl Engine {
             let retry = self.send(job, Some(&navigation), None, None).await?;
             if retry.status().is_success() {
                 job.session = Some(navigation);
+            }
+            response = retry;
+        }
+        // Cloudflare's bot check challenges a request that claims to be a browser but does not have a
+        // browser's network fingerprint; the same request with an honest program name often passes.
+        if response.status() == StatusCode::FORBIDDEN && is_bot_challenge(&response) {
+            let mut honest = job.session.clone().unwrap_or_else(|| Session::for_url(&job.url));
+            honest.user_agent = Some(HONEST_USER_AGENT.into());
+            honest.headers.clear();
+            let retry = self.send(job, Some(&honest), None, None).await?;
+            if retry.status().is_success() {
+                job.session = Some(honest);
             }
             response = retry;
         }

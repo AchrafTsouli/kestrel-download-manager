@@ -107,6 +107,15 @@ async fn a_site_accepting_only_browser_navigations_is_downloaded() {
 }
 
 #[tokio::test]
+async fn a_bot_check_refusing_the_browser_identity_is_passed_honestly() {
+    let server = LabServer::start().await.unwrap();
+    let mut job = job(&server, "botcheck.bin", "size=3000000&bot_check=1", 4);
+    run(&engine(), &mut job).await.unwrap();
+    assert_eq!(std::fs::read(&job.destination).unwrap(), expected(3000000, 1));
+    assert_eq!(job.session.unwrap().user_agent.as_deref(), Some(flux_engine::HONEST_USER_AGENT), "the accepted identity was not kept for the transfer");
+}
+
+#[tokio::test]
 async fn temporary_failures_and_cut_connections_are_retried() {
     let server = LabServer::start().await.unwrap();
     let engine = engine();

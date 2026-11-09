@@ -1,0 +1,49 @@
+import { invoke } from "@tauri-apps/api/core";
+
+export type Status = "Queued" | "Connecting" | "Downloading" | "Retrying" | "Finishing" | "Paused" | "Completed" | "Failed";
+export type Download = {
+  id: string; name: string; url: string; path: string; folder: string; category: string; description: string; queue: string;
+  status: Status; kind: "file" | "video" | "torrent"; written: number; total: number | null; bytesPerSecond: number; connections: number;
+  segments: { start: number; end: number | null; done: number }[]; resumable: boolean; addedMs: number; lastTryMs: number | null;
+  completedMs: number | null; error: string | null; note: string | null; exists: boolean; speedLimit: number;
+};
+export type AfterQueue = "nothing" | "exit" | "sleep" | "hibernate" | "shutdown";
+export type Queue = { name: string; maxActive: number; scheduleEnabled: boolean; startTime: string | null; stopTime: string | null; days: number[]; after: AfterQueue; retries: number };
+export type Settings = {
+  downloadDir: string; categoryFolders: boolean; connections: number; speedLimit: number; showStartDialog: boolean; showProgressWindow: boolean;
+  showCompleteDialog: boolean; theme: string; language: string; minimizeToTray: boolean; startWithWindows: boolean; monitorClipboard: boolean;
+  playSounds: boolean; maxRetries: number; proxy: string; userAgent: string; queues: Queue[]; hostLimits: Record<string, number>;
+  updateFeed: string; autoCheckUpdates: boolean; autoUpdateTools: boolean; lastUpdateCheckMs: number; captureExtensions: string;
+  captureEnabled: boolean; videoPanel: boolean; excludedSites: string; columns: string[];
+};
+export type Probe = { url: string; fileName: string; total: number | null; resumable: boolean; contentType: string | null; category: string; folder: string; error: string | null };
+
+export const call = invoke;
+export const categories = ["Compressed", "Documents", "Music", "Programs", "Video", "Images", "Other"];
+export const running = (s: Status) => s === "Connecting" || s === "Downloading" || s === "Retrying" || s === "Finishing";
+export const resumable = (s: Status) => s === "Paused" || s === "Failed" || s === "Queued";
+
+export function size(bytes: number | null | undefined, empty = "") {
+  if (bytes == null) return empty;
+  if (bytes >= 1 << 30) return (bytes / (1 << 30)).toFixed(2) + " GB";
+  if (bytes >= 1 << 20) return (bytes / (1 << 20)).toFixed(1) + " MB";
+  if (bytes >= 1024) return Math.round(bytes / 1024) + " KB";
+  return bytes + " B";
+}
+export const exact = (bytes: number) => bytes.toLocaleString() + " bytes";
+export const percent = (d: Download) => (d.total ? Math.min(100, (d.written / d.total) * 100) : d.status === "Completed" ? 100 : 0);
+export function timeLeft(d: Download) {
+  if (!d.total || d.bytesPerSecond <= 0 || !running(d.status)) return "—";
+  return clock(Math.round((d.total - d.written) / d.bytesPerSecond));
+}
+export function clock(seconds: number) {
+  const two = (n: number) => String(n).padStart(2, "0");
+  return `${two(Math.floor(seconds / 3600))}:${two(Math.floor((seconds % 3600) / 60))}:${two(seconds % 60)}`;
+}
+export const stamp = (ms: number | null) => ms ? new Date(ms).toLocaleString(undefined, { month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false }) : "";
+export const statusText = (d: Download) => d.status === "Completed" ? (d.exists ? "Complete" : "File missing") : d.status === "Downloading" ? `${percent(d).toFixed(2)}%` : d.status;
+export const statusClass = (d: Download) => d.status === "Completed" ? (d.exists ? "good" : "warn") : d.status === "Failed" ? "bad" : d.status === "Paused" ? "warn" : "run";
+
+export function applyTheme(theme: string) {
+  document.documentElement.dataset.theme = theme === "light" ? "light" : "dark";
+}
