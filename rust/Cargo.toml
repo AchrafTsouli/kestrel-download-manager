@@ -44,3 +44,11 @@ lto = "thin"
 codegen-units = 1
 strip = true
 opt-level = 3
+
+# Debug builds (tests, cargo check) keep line numbers for our code only: the libraries we use
+# carry no debug info, which keeps target/debug a few GB instead of 16.
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false
