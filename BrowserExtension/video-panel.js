@@ -1,7 +1,7 @@
 (() => {
-  if (globalThis.apexVideoPanelVersion === '1.1.0') return;
+  if (globalThis.apexVideoPanelVersion === '1.1.1') return;
   globalThis.apexVideoPanelDispose?.();
-  globalThis.apexVideoPanelVersion = '1.1.0';
+  globalThis.apexVideoPanelVersion = '1.1.1';
   const events = new AbortController();
   document.querySelectorAll('[data-apex-video-panel]').forEach(host => host.remove());
   const panels = new Map();
@@ -46,13 +46,13 @@
   const sizeText = size => !size ? 'Size unknown' : size >= 1073741824 ? `${(size / 1073741824).toFixed(2)} GB` : `${(size / 1048576).toFixed(2)} MB`;
   function makePanel(video) {
     const host = document.createElement('div');
-    host.setAttribute('data-apex-video-panel', '1.1.0');
+    host.setAttribute('data-apex-video-panel', '1.1.1');
     host.style.cssText = 'all:initial!important;position:fixed!important;z-index:2147483647!important;display:none!important;';
     const root = host.attachShadow({ mode: 'closed' });
     const ARROW = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11m0 0-4.5-4.5M12 15l4.5-4.5M5 19.5h14"/></svg>';
     root.innerHTML = `<style>
       :host{color-scheme:dark}*{box-sizing:border-box}
-      .panel{font:12.5px/1.4 "Segoe UI",system-ui,Arial,sans-serif;color:#dde7f0;direction:ltr;text-align:left;-webkit-font-smoothing:antialiased}
+      .panel{display:flex;flex-direction:column;align-items:flex-end;font:12.5px/1.4 "Segoe UI",system-ui,Arial,sans-serif;color:#dde7f0;direction:ltr;text-align:left;-webkit-font-smoothing:antialiased}
       button{font:inherit;color:inherit;cursor:pointer;margin:0}button:focus-visible{outline:2px solid #7dd3fc;outline-offset:2px}button:disabled{opacity:.55;cursor:wait}
       svg{width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round;flex:none}
       .bar{display:flex;align-items:center;width:max-content;max-width:calc(100vw - 8px);padding:3px;gap:2px;border-radius:999px;background:rgba(14,20,27,.82);backdrop-filter:blur(10px) saturate(1.4);border:1px solid rgba(125,211,252,.28);box-shadow:0 6px 22px rgba(0,0,0,.45);touch-action:none;user-select:none;cursor:grab;transition:border-color .15s}
@@ -232,8 +232,12 @@
     const visible = allowed() && !document.hidden && activeVideo === panel.video && !panel.dismissed && (panel.items.length > 0 || !!panel.page) && ApexVideoPanelPolicy.playing(panel.video,rect,innerWidth,innerHeight,started(panel.video));
     panel.host.style.setProperty('display', visible ? 'block' : 'none', 'important');
     if (!visible) return;
-    const point=panel.manualPosition || {x:rect.left+8,y:rect.top+8};
     const size=panel.host.getBoundingClientRect();
+    // Like IDM: just above the video's top-right corner, outside the picture; inside that corner
+    // when the video starts at the top of the window. The menu opens below, right-aligned.
+    const barHeight=panel.root.querySelector('.bar').getBoundingClientRect().height || 32;
+    const above=rect.top-barHeight-4;
+    const point=panel.manualPosition || {x:Math.min(rect.right,innerWidth)-size.width,y:above >= 0 ? above : Math.max(rect.top,0)+6};
     const clamped=ApexVideoPanelPolicy.clamp(point,size,{width:innerWidth,height:innerHeight});
     panel.host.style.setProperty('left', `${clamped.x}px`, 'important');
     panel.host.style.setProperty('top', `${clamped.y}px`, 'important');
