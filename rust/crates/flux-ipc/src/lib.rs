@@ -42,6 +42,9 @@ pub struct Response {
     pub policy: Option<CapturePolicy>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub video: Option<serde_json::Value>,
+    /// The download list (`list`, for the command line).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub downloads: Option<serde_json::Value>,
 }
 
 impl Response {
@@ -88,7 +91,7 @@ pub fn validate(request: &Request) -> Result<(), String> {
     };
     let session = |url: &Url| request.session.as_ref().map_or(Ok(()), |s| s.validate(url).map_err(|_| "Invalid download session.".to_string()));
     match request.action.as_str() {
-        "ping" | "show" | "quit" | "pause-all" | "resume-all" | "capture-policy" | "pause" | "resume" => Ok(()),
+        "ping" | "show" | "quit" | "pause-all" | "resume-all" | "capture-policy" | "pause" | "resume" | "list" => Ok(()),
         "video-formats" => session(&web(&request.url)?),
         "download" => {
             if !request.request_id.as_deref().is_some_and(is_guid) {
@@ -131,6 +134,30 @@ pub async fn write_frame<T: Serialize>(writer: &mut (impl AsyncWrite + Unpin), v
     writer.write_all(&(body.len() as u32).to_le_bytes()).await?;
     writer.write_all(&body).await?;
     writer.flush().await
+}
+
+/// Starts Flux (in the tray) for a caller that is about to exit: it must not keep the caller's
+/// console or pipes (the browser's, a script's) open, or they would wait for Flux to close.
+pub fn start_app(path: &std::path::Path) -> std::io::Result<()> {
+    #[cfg(windows)]
+    unsafe {
+        use windows_sys::Win32::Foundation::{HANDLE_FLAG_INHERIT, SetHandleInformation};
+        use windows_sys::Win32::System::Console::{GetStdHandle, STD_ERROR_HANDLE, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE};
+        // Windows hands every inheritable handle to the child, whatever its own stdio is.
+        for id in [STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, STD_ERROR_HANDLE] {
+            let handle = GetStdHandle(id);
+            if !handle.is_null() {
+                SetHandleInformation(handle, HANDLE_FLAG_INHERIT, 0);
+            }
+        }
+    }
+    std::process::Command::new(path)
+        .arg("--background")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .map(|_| ())
 }
 
 #[cfg(windows)]

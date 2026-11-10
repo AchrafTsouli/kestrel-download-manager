@@ -1,7 +1,7 @@
 {
   "bundle": {
     "targets": ["deb", "appimage"],
-    "externalBin": ["binaries/flux-nmhost"],
+    "externalBin": ["binaries/flux-nmhost", "binaries/flux-cli"],
     "category": "Utility",
     "shortDescription": "Download manager: files, videos and torrents",
     "linux": {

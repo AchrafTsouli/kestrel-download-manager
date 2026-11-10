@@ -240,7 +240,7 @@ async fn forward(request: &Request) -> Response {
             Err(_) => {
                 if !started {
                     started = true;
-                    if std::process::Command::new(app_path()).arg("--background").spawn().is_err() {
+                    if flux_ipc::start_app(&app_path()).is_err() {
                         return Response::error("Flux is not installed beside the browser bridge.");
                     }
                 }

@@ -72,6 +72,12 @@ async fn handle(app: &AppHandle, request: Request) -> Response {
             Response::ok()
         }
         "pause-all" => { manager.pause_all(); Response::ok() }
+        "list" => {
+            let list: Vec<serde_json::Value> = manager.views().into_iter().map(|v| serde_json::json!({
+                "id": v.id, "name": v.name, "status": v.status, "written": v.written, "total": v.total, "bytesPerSecond": v.bytes_per_second, "url": v.url,
+            })).collect();
+            Response { ok: true, downloads: Some(serde_json::Value::Array(list)), ..Default::default() }
+        }
         "resume-all" => { manager.resume_all(); Response::ok() }
         "capture-policy" => {
             let s = manager.settings();

@@ -25,7 +25,7 @@ if (!$SkipBuild) {
     } finally { Pop-Location }
     Push-Location $rust
     try {
-        cargo build --release -p flux-nmhost
+        cargo build --release -p flux-nmhost -p flux-cli
         if ($LASTEXITCODE -ne 0) { throw 'The browser bridge did not build.' }
     } finally { Pop-Location }
 }
@@ -39,7 +39,7 @@ if (@('yt-dlp.exe','ffmpeg.exe','ffprobe.exe','qjs.exe','aria2c.exe') | Where-Ob
 if (Test-Path -LiteralPath $stage) { Remove-Item -LiteralPath $stage -Recurse -Force }
 New-Item -ItemType Directory -Path $stage, (Join-Path $stage 'BrowserExtension'), (Join-Path $stage 'video-tools'), (Join-Path $stage 'licenses') -Force | Out-Null
 Copy-Item -LiteralPath (Join-Path $release 'flux.exe') -Destination (Join-Path $stage 'Flux.exe')
-Copy-Item -LiteralPath (Join-Path $release 'flux-nmhost.exe') -Destination $stage
+Copy-Item -LiteralPath (Join-Path $release 'flux-nmhost.exe'), (Join-Path $release 'flux-cli.exe') -Destination $stage
 Get-ChildItem -LiteralPath (Join-Path $root 'BrowserExtension') -File | Where-Object { $_.Name -ne 'package.json' -and $_.Name -notlike '*.test.js' } |
     Copy-Item -Destination (Join-Path $stage 'BrowserExtension')
 Get-ChildItem -LiteralPath $tools -File | Where-Object { $_.Extension -in @('.exe','.dll','.txt','.json') -and $_.Name -notin @('node.exe','NODE-LICENSE.txt') } |
@@ -47,7 +47,7 @@ Get-ChildItem -LiteralPath $tools -File | Where-Object { $_.Extension -in @('.ex
 Copy-Item -LiteralPath (Join-Path $root 'SwiftFetch/app.ico'), (Join-Path $root 'SwiftFetch/app-icon.png'), (Join-Path $root 'installer/Browser-Setup.html'), (Join-Path $root 'installer/INSTALLATION.txt') -Destination $stage
 Copy-Item -LiteralPath (Join-Path $root 'LICENSE') -Destination (Join-Path $stage 'licenses/Flux-LICENSE.txt')
 
-foreach ($required in @('Flux.exe','flux-nmhost.exe','BrowserExtension/manifest.json','video-tools/yt-dlp.exe','video-tools/ffmpeg.exe','video-tools/ffprobe.exe','video-tools/qjs.exe','video-tools/aria2c.exe','video-tools/sources.json','app.ico')) {
+foreach ($required in @('Flux.exe','flux-nmhost.exe','flux-cli.exe','BrowserExtension/manifest.json','video-tools/yt-dlp.exe','video-tools/ffmpeg.exe','video-tools/ffprobe.exe','video-tools/qjs.exe','video-tools/aria2c.exe','video-tools/sources.json','app.ico')) {
     if (!(Test-Path -LiteralPath (Join-Path $stage $required))) { throw "Incomplete payload: $required" }
 }
 

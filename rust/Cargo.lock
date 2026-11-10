@@ -1638,6 +1638,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "flux-cli"
+version = "2.0.0-alpha.1"
+dependencies = [
+ "flux-ipc",
+ "getrandom 0.2.17",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "flux-engine"
 version = "2.0.0-alpha.1"
 dependencies = [

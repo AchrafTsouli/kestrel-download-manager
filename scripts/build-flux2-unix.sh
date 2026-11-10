@@ -6,10 +6,10 @@
 # dependencies; macOS: brew install ffmpeg aria2 yt-dlp) and yt-dlp from PATH.
 set -euo pipefail
 cd "$(dirname "$0")/../rust"
-cargo build --release -p flux-nmhost
+cargo build --release -p flux-nmhost -p flux-cli
 triple="$(rustc -vV | sed -n 's/^host: //p')"
 mkdir -p app/src-tauri/binaries
-cp "${CARGO_TARGET_DIR:-target}/release/flux-nmhost" "app/src-tauri/binaries/flux-nmhost-$triple"
+for tool in flux-nmhost flux-cli; do cp "${CARGO_TARGET_DIR:-target}/release/$tool" "app/src-tauri/binaries/$tool-$triple"; done
 cd app
 if [ "${SKIP_FRONTEND:-}" = "1" ]; then
   cargo tauri build --config '{"build":{"beforeBuildCommand":""}}'
