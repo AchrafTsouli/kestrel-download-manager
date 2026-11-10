@@ -54,7 +54,7 @@
     <img src="/logo.png" alt="" width="16" height="16" data-tauri-drag-region />
     <span class="caption" data-tauri-drag-region>{title || "Download progress"}</span>
     <button class="cap tray" title="Download in the background (it stays in the tray)" aria-label="Download in the background" onclick={() => call("to_background", { id })}>
-      <svg width="18" height="12" viewBox="0 0 18 12" aria-hidden="true"><path d="M1 6h12M9 1.5 14 6l-5 4.5" fill="none" stroke="#22c55e" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" /></svg>
+      <img class="tray-dark" src="/to-tray-dark.png" alt="" width="20" height="20" /><img class="tray-light" src="/to-tray-light.png" alt="" width="20" height="20" />
     </button>
     <button class="cap" title="Minimize" aria-label="Minimize" onclick={() => win.minimize()}><svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M0 5.5h10" stroke="currentColor" /></svg></button>
     <button class="cap" title="Maximize" aria-label="Maximize" onclick={() => win.toggleMaximize()}><svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><rect x="0.5" y="0.5" width="9" height="9" fill="none" stroke="currentColor" /></svg></button>
@@ -147,6 +147,10 @@
   .caption { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .cap { width: 46px; height: 31px; border: 0; background: transparent; color: var(--text); font-family: "Segoe Fluent Icons", "Segoe MDL2 Assets"; font-size: 10px; cursor: default; display: grid; place-items: center; }
   .cap:hover { background: var(--raised); }
+  /* The same icon as the background downloads' tray icon, in the theme's version. */
+  .tray-light { display: none; }
+  :global([data-theme="light"]) .tray-dark { display: none; }
+  :global([data-theme="light"]) .tray-light { display: block; }
   .cap.close:hover { background: #c42b1c; color: #fff; }
   .win { min-height: 0; }
   .win-body { display: flex; flex-direction: column; gap: 10px; }

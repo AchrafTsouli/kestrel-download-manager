@@ -85,14 +85,19 @@ fn line(v: &View) -> String {
     format!("{name} — {detail}")
 }
 
-fn menu(app: &AppHandle, views: &[View]) -> tauri::Result<Menu<tauri::Wry>> {
+/// The menu and its lines by download ID, so the lines can be updated in place: replacing the
+/// menu every second would close it while the user is reading it.
+fn menu(app: &AppHandle, views: &[View]) -> tauri::Result<(Menu<tauri::Wry>, HashMap<String, MenuItem<tauri::Wry>>)> {
     let menu = Menu::new(app)?;
+    let mut items = HashMap::new();
     for v in views {
-        menu.append(&MenuItem::with_id(app, format!("bg:{}", v.id), line(v), true, None::<&str>)?)?;
+        let item = MenuItem::with_id(app, format!("bg:{}", v.id), line(v), true, None::<&str>)?;
+        menu.append(&item)?;
+        items.insert(v.id.clone(), item);
     }
     menu.append(&PredefinedMenuItem::separator(app)?)?;
     menu.append(&MenuItem::with_id(app, "bg-show-all", "Show all progress windows", true, None::<&str>)?)?;
-    Ok(menu)
+    Ok((menu, items))
 }
 
 fn reopen(app: &AppHandle, id: &str) {
@@ -111,6 +116,9 @@ pub fn send(app: &AppHandle, id: &str) {
 pub fn watch(app: AppHandle) {
     tauri::async_runtime::spawn(async move {
         let mut shown = (String::new(), false, String::new(), String::new());
+        // The menu's downloads (in order) and its lines with the text they show.
+        let mut listed: Vec<String> = Vec::new();
+        let mut items: HashMap<String, (MenuItem<tauri::Wry>, String)> = HashMap::new();
         let mut tick = 0u32;
         let mut light = light_taskbar();
         loop {
@@ -146,6 +154,8 @@ pub fn watch(app: AppHandle) {
                 if !shown.0.is_empty() {
                     let _ = app.remove_tray_by_id(TRAY_ID);
                     shown = Default::default();
+                    listed.clear();
+                    items.clear();
                 }
                 continue;
             }
@@ -174,18 +184,41 @@ pub fn watch(app: AppHandle) {
                 continue;
             }
             let icon = ICONS.iter().find(|(name, _, _)| *name == state).and_then(|(_, dark, bright)| Image::from_bytes(if light { bright } else { dark }).ok());
-            let Ok(menu) = menu(&app, &views) else { continue };
+            let ids: Vec<String> = views.iter().map(|v| v.id.clone()).collect();
+            // A new menu only when downloads join or leave; otherwise its lines change in place.
+            let new_menu = if ids != listed {
+                match menu(&app, &views) {
+                    Ok((menu, lines)) => {
+                        items = lines.into_iter().map(|(id, item)| { let text = views.iter().find(|v| v.id == id).map(line).unwrap_or_default(); (id, (item, text)) }).collect();
+                        listed = ids;
+                        Some(menu)
+                    }
+                    Err(_) => continue,
+                }
+            } else {
+                for v in &views {
+                    if let Some((item, text)) = items.get_mut(&v.id) {
+                        let now_text = line(v);
+                        if *text != now_text {
+                            let _ = item.set_text(&now_text);
+                            *text = now_text;
+                        }
+                    }
+                }
+                None
+            };
             match app.tray_by_id(TRAY_ID) {
                 Some(tray) => {
                     if next.0 != shown.0 || next.1 != shown.1 {
                         let _ = tray.set_icon(icon);
                     }
                     let _ = tray.set_tooltip(Some(&next.2));
-                    if next.3 != shown.3 {
+                    if let Some(menu) = new_menu {
                         let _ = tray.set_menu(Some(menu));
                     }
                 }
                 None => {
+                    let Some(menu) = new_menu.or_else(|| menu(&app, &views).ok().map(|(m, _)| m)) else { continue };
                     let mut builder = TrayIconBuilder::with_id(TRAY_ID).tooltip(&next.2).menu(&menu).show_menu_on_left_click(true).on_menu_event(|app, event| {
                         let id = event.id.as_ref();
                         if let Some(id) = id.strip_prefix("bg:") {
