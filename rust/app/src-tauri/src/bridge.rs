@@ -31,8 +31,25 @@ pub fn serve(app: AppHandle) {
             });
         }
     });
-    #[cfg(not(windows))]
-    let _ = app;
+    #[cfg(unix)]
+    tauri::async_runtime::spawn(async move {
+        let listener = match flux_ipc::pipe::listen() {
+            Ok(listener) => listener,
+            Err(error) => {
+                let _ = app.emit("message", format!("The browser connection could not start: {error}"));
+                return;
+            }
+        };
+        while let Ok(mut stream) = listener.accept().await {
+            let app = app.clone();
+            tauri::async_runtime::spawn(async move {
+                if let Ok(Some(request)) = read_frame::<Request>(&mut stream).await {
+                    let response = handle(&app, request).await;
+                    let _ = write_frame(&mut stream, &response).await;
+                }
+            });
+        }
+    });
 }
 
 async fn handle(app: &AppHandle, request: Request) -> Response {

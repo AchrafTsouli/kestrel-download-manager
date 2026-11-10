@@ -67,7 +67,8 @@ struct Run {
 pub struct Tools {
     pub directory: PathBuf,
     pub update_directory: PathBuf,
-    exact_cut: Mutex<Option<bool>>,
+    /// The H.264 encoder an exact cut uses, once looked up (None inside: there is none).
+    exact_cut: Mutex<Option<Option<&'static str>>>,
     /// The proxy chosen in Flux's options (with its credentials), passed to yt-dlp.
     proxy: Mutex<Option<String>>,
 }
@@ -81,9 +82,15 @@ impl Tools {
         *self.proxy.lock().unwrap() = proxy;
     }
 
+    /// `name` in the tools folder ("yt-dlp.exe" on Windows, "yt-dlp" elsewhere).
+    fn file(&self, name: &str) -> PathBuf {
+        self.directory.join(format!("{name}{}", std::env::consts::EXE_SUFFIX))
+    }
+
+    /// yt-dlp, FFmpeg and ffprobe, plus a JavaScript runtime for YouTube (bundled on Windows; on
+    /// Linux and macOS yt-dlp looks for one itself).
     pub fn available(&self) -> bool {
-        ["yt-dlp.exe", "ffmpeg.exe", "ffprobe.exe"].iter().all(|n| self.directory.join(n).exists())
-            && (self.directory.join("qjs.exe").exists() || self.directory.join("node.exe").exists())
+        ["yt-dlp", "ffmpeg", "ffprobe"].iter().all(|n| self.file(n).exists()) && (!cfg!(windows) || self.javascript_runtime().is_some())
     }
 
     fn path(&self, tool: &str) -> Result<PathBuf, String> {
@@ -91,24 +98,32 @@ impl Tools {
             return Err("The video tools are missing. Reinstall Flux to restore them.".into());
         }
         // A verified newer yt-dlp replaces the aging bundled copy; FFmpeg and QuickJS stay bundled.
-        if tool == "yt-dlp.exe"
+        if tool == "yt-dlp"
             && let Some(updated) = update::preferred(&self.directory, &self.update_directory) {
                 return Ok(updated);
             }
-        Ok(self.directory.join(tool))
+        Ok(self.file(tool))
     }
 
-    fn javascript_runtime(&self) -> String {
-        let qjs = self.directory.join("qjs.exe");
-        if qjs.exists() { format!("quickjs:{}", qjs.display()) } else { format!("node:{}", self.directory.join("node.exe").display()) }
+    fn javascript_runtime(&self) -> Option<String> {
+        let (qjs, node) = (self.file("qjs"), self.file("node"));
+        if qjs.exists() {
+            Some(format!("quickjs:{}", qjs.display()))
+        } else if node.exists() {
+            Some(format!("node:{}", node.display()))
+        } else {
+            None
+        }
     }
 
     fn common(&self, cookies: Option<&Path>, session: Option<&Session>, playlist: bool) -> Vec<String> {
-        let mut args: Vec<String> = [if playlist { "--yes-playlist" } else { "--no-playlist" }, "--ignore-config", "--no-cache-dir", "--output-na-placeholder", "null", "--no-js-runtimes", "--js-runtimes"]
+        let mut args: Vec<String> = [if playlist { "--yes-playlist" } else { "--no-playlist" }, "--ignore-config", "--no-cache-dir", "--output-na-placeholder", "null"]
             .iter()
             .map(|s| s.to_string())
             .collect();
-        args.push(self.javascript_runtime());
+        if let Some(runtime) = self.javascript_runtime() {
+            args.extend(["--no-js-runtimes".into(), "--js-runtimes".into(), runtime]);
+        }
         args.push("--ffmpeg-location".into());
         args.push(self.directory.display().to_string());
         if let Some(proxy) = self.proxy.lock().unwrap().clone() {
@@ -182,13 +197,23 @@ impl Tools {
 
     /// True when the bundled FFmpeg can re-encode a cut (Windows' Media Foundation H.264 encoder).
     pub async fn supports_exact_cut(&self) -> bool {
+        self.cut_encoder().await.is_some()
+    }
+
+    /// The system's own H.264 encoder (Windows Media Foundation, Apple VideoToolbox), or x264 in a
+    /// system FFmpeg on Linux.
+    async fn cut_encoder(&self) -> Option<&'static str> {
         if let Some(known) = *self.exact_cut.lock().unwrap() {
             return known;
         }
         let args = ["-hide_banner".to_string(), "-encoders".to_string()];
-        let known = matches!(self.run("ffmpeg.exe", &args, |_| {}, &CancellationToken::new()).await, Ok(run) if run.code == Some(0) && run.stdout.contains(" h264_mf "));
-        *self.exact_cut.lock().unwrap() = Some(known);
-        known
+        let list = match self.run("ffmpeg", &args, |_| {}, &CancellationToken::new()).await {
+            Ok(run) if run.code == Some(0) => run.stdout,
+            _ => String::new(),
+        };
+        let found = ["h264_mf", "h264_videotoolbox", "libx264"].into_iter().find(|e| list.contains(&format!(" {e} ")));
+        *self.exact_cut.lock().unwrap() = Some(found);
+        found
     }
 
     /// One video's qualities. Refused requests are retried with Chrome's network signature; the
@@ -204,10 +229,10 @@ impl Tools {
             args.extend(["--skip-download", "--dump-single-json", "--no-check-formats", "--playlist-items", "1", "--", &canonical].map(String::from));
             args
         };
-        let mut run = self.run("yt-dlp.exe", &arguments(false), |_| {}, cancel).await?;
+        let mut run = self.run("yt-dlp", &arguments(false), |_| {}, cancel).await?;
         let mut impersonated = false;
         if run.code != Some(0) && blocked(&run.stderr) {
-            run = self.run("yt-dlp.exe", &arguments(true), |_| {}, cancel).await?;
+            run = self.run("yt-dlp", &arguments(true), |_| {}, cancel).await?;
             impersonated = true;
         }
         if run.code != Some(0) {
@@ -225,7 +250,7 @@ impl Tools {
         let cookies = CookieFile::write(session, page)?;
         let mut args = self.common(cookies.path(), session, true);
         args.extend(["--flat-playlist".into(), "--dump-single-json".into(), "--playlist-items".into(), format!("1:{}", maximum.clamp(1, 5000)), "--".into(), list]);
-        let run = self.run("yt-dlp.exe", &args, |_| {}, cancel).await?;
+        let run = self.run("yt-dlp", &args, |_| {}, cancel).await?;
         if run.code != Some(0) {
             return Err(failure(&run.stderr));
         }
@@ -282,7 +307,7 @@ impl Tools {
         let mut result_file: Option<PathBuf> = None;
         let mut run = {
             let mut line = |text: &str| tracker.line(text, &mut result_file, &events);
-            self.run("yt-dlp.exe", &args, &mut line, &cancel).await
+            self.run("yt-dlp", &args, &mut line, &cancel).await
         };
         if matches!(&run, Err(e) if e.is_empty()) {
             return Ok(Outcome::Paused);
@@ -293,7 +318,7 @@ impl Tools {
             let at = args.iter().position(|a| a == "--format").unwrap_or(args.len() - 2);
             args.splice(at..at, IMPERSONATION.iter().map(|s| s.to_string()));
             let mut line = |text: &str| tracker.line(text, &mut result_file, &events);
-            run = self.run("yt-dlp.exe", &args, &mut line, &cancel).await;
+            run = self.run("yt-dlp", &args, &mut line, &cancel).await;
             if matches!(&run, Err(e) if e.is_empty()) {
                 return Ok(Outcome::Paused);
             }
@@ -356,7 +381,7 @@ impl Tools {
         let probe_args = ["-v", "error", "-show_entries", "stream=codec_type,codec_name,bit_rate:format=duration,bit_rate", "-of", "json"].map(String::from);
         let mut info_args = probe_args.to_vec();
         info_args.push(input.display().to_string());
-        let info = self.run("ffprobe.exe", &info_args, |_| {}, cancel).await?;
+        let info = self.run("ffprobe", &info_args, |_| {}, cancel).await?;
         if info.code != Some(0) {
             return Err(format!("The downloaded part could not be read: {}", failure(&info.stderr)));
         }
@@ -376,9 +401,11 @@ impl Tools {
         if audio_only {
             args.extend(["-vn", "-map", "0:a:0", "-c:a", "aac", "-b:a", "192k"].map(String::from));
         } else {
-            args.extend(["-map", "0:v:0", "-map", "0:a?", "-c:v", "h264_mf", "-b:v"].map(String::from));
+            let encoder = self.cut_encoder().await.ok_or("No H.264 encoder is available on this computer to cut to the exact second. Use Fast cut.")?;
+            args.extend(["-map", "0:v:0", "-map", "0:a?", "-c:v", encoder, "-b:v"].map(String::from));
             args.push(target.to_string());
-            args.extend(["-pix_fmt", "nv12", "-c:a", "aac", "-b:a", "192k"].map(String::from));
+            // Media Foundation wants NV12; the others take the usual 4:2:0.
+            args.extend(["-pix_fmt", if encoder == "h264_mf" { "nv12" } else { "yuv420p" }, "-c:a", "aac", "-b:a", "192k"].map(String::from));
         }
         args.extend(["-movflags".into(), "+faststart".into(), output.display().to_string()]);
         events(MediaEvent::Phase { text: "Cutting to the exact second".into(), fraction: Some(0.0) });
@@ -388,7 +415,7 @@ impl Tools {
                     events(MediaEvent::Phase { text: "Cutting to the exact second".into(), fraction: Some((us as f64 / 1e6 / duration).clamp(0.0, 1.0)) });
                 }
         };
-        let result = self.run("ffmpeg.exe", &args, line, cancel).await?;
+        let result = self.run("ffmpeg", &args, line, cancel).await?;
         if result.code != Some(0) || !output.exists() {
             return Err(if result.stderr.contains("h264_mf") || result.stderr.contains("MFT") {
                 "Windows' video encoder is not available on this PC (for example a Windows \"N\" edition without the Media Feature Pack). Use Fast cut.".into()
@@ -403,7 +430,7 @@ impl Tools {
     /// The output must hold the streams that were asked for.
     async fn verify(&self, file: &Path, selection: &Selection, tracks: usize, cancel: &CancellationToken) -> Result<(), String> {
         let args = ["-v".into(), "error".into(), "-show_entries".into(), "stream=codec_type".into(), "-of".into(), "json".into(), file.display().to_string()];
-        let run = self.run("ffprobe.exe", &args, |_| {}, cancel).await?;
+        let run = self.run("ffprobe", &args, |_| {}, cancel).await?;
         if run.code != Some(0) {
             return Err(format!("The downloaded media could not be read: {}", failure(&run.stderr)));
         }

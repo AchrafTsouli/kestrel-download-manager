@@ -135,6 +135,9 @@ pub async fn write_frame<T: Serialize>(writer: &mut (impl AsyncWrite + Unpin), v
 
 #[cfg(windows)]
 pub mod pipe;
+#[cfg(unix)]
+#[path = "pipe_unix.rs"]
+pub mod pipe;
 
 #[cfg(test)]
 mod tests {

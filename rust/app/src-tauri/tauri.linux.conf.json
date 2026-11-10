@@ -1,0 +1,14 @@
+{
+  "bundle": {
+    "targets": ["deb", "appimage"],
+    "externalBin": ["binaries/flux-nmhost"],
+    "category": "Utility",
+    "shortDescription": "Download manager: files, videos and torrents",
+    "linux": {
+      "deb": {
+        "depends": ["ffmpeg", "aria2"],
+        "section": "net"
+      }
+    }
+  }
+}

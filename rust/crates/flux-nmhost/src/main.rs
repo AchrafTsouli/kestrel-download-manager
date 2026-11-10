@@ -13,23 +13,97 @@ use std::time::Duration;
 
 use flux_ipc::{CapturePolicy, HOST_NAME, Request, Response, read_frame, write_frame};
 
-const BROWSERS: &[&str] = &[r"Software\Google\Chrome", r"Software\Microsoft\Edge", r"Software\BraveSoftware\Brave-Browser"];
 /// Flux's add-on ID in Firefox (browser_specific_settings.gecko.id of the Firefox build).
 const FIREFOX_ID: &str = "flux@achraftsouli.github.io";
-const FIREFOX_KEY: &str = r"HKCU\Software\Mozilla\NativeMessagingHosts";
 
 fn here() -> PathBuf {
     std::env::current_exe().ok().and_then(|p| p.parent().map(Path::to_path_buf)).unwrap_or_default()
 }
+/// Where the bridge keeps its manifests: beside it on Windows (the installer writes there), in
+/// Flux's data folder elsewhere (a system-wide install folder is not the user's to write).
+fn manifest_dir() -> PathBuf {
+    if cfg!(windows) { here() } else { flux_store::default_directory() }
+}
 fn manifest_path() -> PathBuf {
-    here().join(format!("{HOST_NAME}.json"))
+    manifest_dir().join(format!("{HOST_NAME}.json"))
 }
 fn firefox_manifest_path() -> PathBuf {
-    here().join(format!("{HOST_NAME}.firefox.json"))
+    manifest_dir().join(format!("{HOST_NAME}.firefox.json"))
 }
 fn app_path() -> PathBuf {
     let dir = here();
-    ["Flux.exe", "flux.exe"].iter().map(|n| dir.join(n)).find(|p| p.exists()).unwrap_or_else(|| dir.join("flux.exe"))
+    ["Flux.exe", "flux.exe", "flux"].iter().map(|n| dir.join(n)).find(|p| p.exists()).unwrap_or_else(|| dir.join(if cfg!(windows) { "flux.exe" } else { "flux" }))
+}
+
+/// Where a browser looks for native messaging hosts (current user).
+enum Place {
+    /// Windows: a registry key whose default value is the manifest's path.
+    #[cfg_attr(not(windows), allow(dead_code))]
+    Registry(String),
+    /// Linux, macOS: a folder holding `<host name>.json`.
+    #[cfg_attr(windows, allow(dead_code))]
+    Folder(PathBuf),
+}
+
+#[cfg(windows)]
+fn chromium_places() -> Vec<(&'static str, Place)> {
+    [("Chrome", r"Software\Google\Chrome"), ("Edge", r"Software\Microsoft\Edge"), ("Brave", r"Software\BraveSoftware\Brave-Browser")]
+        .into_iter()
+        .map(|(name, key)| (name, Place::Registry(format!(r"HKCU\{key}\NativeMessagingHosts\{HOST_NAME}"))))
+        .collect()
+}
+#[cfg(windows)]
+fn firefox_place() -> Place {
+    Place::Registry(format!(r"HKCU\Software\Mozilla\NativeMessagingHosts\{HOST_NAME}"))
+}
+
+#[cfg(not(windows))]
+fn home() -> PathBuf {
+    std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default()
+}
+#[cfg(target_os = "macos")]
+fn chromium_places() -> Vec<(&'static str, Place)> {
+    let support = home().join("Library/Application Support");
+    [("Chrome", "Google/Chrome"), ("Chromium", "Chromium"), ("Edge", "Microsoft Edge"), ("Brave", "BraveSoftware/Brave-Browser")]
+        .into_iter()
+        .map(|(name, dir)| (name, Place::Folder(support.join(dir).join("NativeMessagingHosts"))))
+        .collect()
+}
+#[cfg(target_os = "macos")]
+fn firefox_place() -> Place {
+    Place::Folder(home().join("Library/Application Support/Mozilla/NativeMessagingHosts"))
+}
+#[cfg(all(unix, not(target_os = "macos")))]
+fn chromium_places() -> Vec<(&'static str, Place)> {
+    let config = std::env::var_os("XDG_CONFIG_HOME").map(PathBuf::from).unwrap_or_else(|| home().join(".config"));
+    [("Chrome", "google-chrome"), ("Chromium", "chromium"), ("Edge", "microsoft-edge"), ("Brave", "BraveSoftware/Brave-Browser")]
+        .into_iter()
+        .map(|(name, dir)| (name, Place::Folder(config.join(dir).join("NativeMessagingHosts"))))
+        .collect()
+}
+#[cfg(all(unix, not(target_os = "macos")))]
+fn firefox_place() -> Place {
+    Place::Folder(home().join(".mozilla/native-messaging-hosts"))
+}
+
+/// Points a browser at a manifest.
+fn install(place: &Place, manifest: &Path) -> bool {
+    match place {
+        Place::Registry(key) => std::process::Command::new("reg").args(["add", key, "/ve", "/t", "REG_SZ", "/d", &manifest.display().to_string(), "/f"]).output().is_ok_and(|o| o.status.success()),
+        Place::Folder(dir) => std::fs::create_dir_all(dir).and_then(|_| std::fs::copy(manifest, dir.join(format!("{HOST_NAME}.json")))).is_ok(),
+    }
+}
+fn uninstall(place: &Place) {
+    match place {
+        Place::Registry(key) => { let _ = std::process::Command::new("reg").args(["delete", key, "/f"]).output(); }
+        Place::Folder(dir) => { let _ = std::fs::remove_file(dir.join(format!("{HOST_NAME}.json"))); }
+    }
+}
+fn write_manifest(path: &Path, manifest: &serde_json::Value) -> Result<(), String> {
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    }
+    std::fs::write(path, serde_json::to_string_pretty(manifest).unwrap()).map_err(|e| e.to_string())
 }
 
 /// The extension ID Chrome derives from a manifest's public key: SHA-256 of the key, first 16 bytes, hex a–p.
@@ -66,10 +140,6 @@ fn caller_allowed(args: &[String]) -> bool {
     }
 }
 
-fn reg_set(key: &str, value: &Path) -> bool {
-    std::process::Command::new("reg").args(["add", key, "/ve", "/t", "REG_SZ", "/d", &value.display().to_string(), "/f"]).output().is_ok_and(|o| o.status.success())
-}
-
 fn register_firefox() -> Result<(), String> {
     let manifest = serde_json::json!({
         "name": HOST_NAME,
@@ -78,8 +148,8 @@ fn register_firefox() -> Result<(), String> {
         "type": "stdio",
         "allowed_extensions": [FIREFOX_ID],
     });
-    std::fs::write(firefox_manifest_path(), serde_json::to_string_pretty(&manifest).unwrap()).map_err(|e| e.to_string())?;
-    if !reg_set(&format!(r"{FIREFOX_KEY}\{HOST_NAME}"), &firefox_manifest_path()) {
+    write_manifest(&firefox_manifest_path(), &manifest)?;
+    if !install(&firefox_place(), &firefox_manifest_path()) {
         return Err("Could not register for Firefox.".into());
     }
     Ok(())
@@ -106,22 +176,24 @@ fn register(ids: &[String]) -> Result<(), String> {
         "type": "stdio",
         "allowed_origins": ids.iter().map(|id| format!("chrome-extension://{id}/")).collect::<Vec<_>>(),
     });
-    std::fs::write(manifest_path(), serde_json::to_string_pretty(&manifest).unwrap()).map_err(|e| e.to_string())?;
-    for browser in BROWSERS {
-        if !reg_set(&format!(r"HKCU\{browser}\NativeMessagingHosts\{HOST_NAME}"), &manifest_path()) {
+    write_manifest(&manifest_path(), &manifest)?;
+    let places = chromium_places();
+    for (browser, place) in &places {
+        if !install(place, &manifest_path()) {
             return Err(format!("Could not register for {browser}."));
         }
     }
     register_firefox()?;
-    println!("Registered {HOST_NAME} for Chrome, Edge, Brave ({}) and Firefox ({FIREFOX_ID}).", ids.join(", "));
+    let names: Vec<&str> = places.iter().map(|(name, _)| *name).collect();
+    println!("Registered {HOST_NAME} for {} ({}) and Firefox ({FIREFOX_ID}).", names.join(", "), ids.join(", "));
     Ok(())
 }
 
 fn unregister() {
-    for browser in BROWSERS {
-        let _ = std::process::Command::new("reg").args(["delete", &format!(r"HKCU\{browser}\NativeMessagingHosts\{HOST_NAME}"), "/f"]).output();
+    for (_, place) in chromium_places() {
+        uninstall(&place);
     }
-    let _ = std::process::Command::new("reg").args(["delete", &format!(r"{FIREFOX_KEY}\{HOST_NAME}"), "/f"]).output();
+    uninstall(&firefox_place());
     let _ = std::fs::remove_file(manifest_path());
     let _ = std::fs::remove_file(firefox_manifest_path());
     println!("Unregistered {HOST_NAME}.");

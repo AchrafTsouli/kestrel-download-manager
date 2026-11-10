@@ -182,7 +182,6 @@ mod tests {
         store.set("settings", &serde_json::json!({ "proxyPassword": "secret-123" })).unwrap();
         drop(store);
         let raw = std::fs::read(&path).unwrap();
-        #[cfg(windows)]
         assert!(!raw.windows(10).any(|w| w == b"secret-123"), "settings are stored protected");
         let store = Store::open(&path).unwrap();
         let loaded: Vec<(String, Record)> = store.load_downloads().unwrap();

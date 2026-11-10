@@ -110,7 +110,7 @@ impl Manager {
             app,
             engine,
             media: flux_media::Tools::new(video_tools_directory(), flux_store::default_directory().join("tools")),
-            torrents: flux_torrent::Tools::new(video_tools_directory().join("aria2c.exe"), flux_store::default_directory().join("torrents")),
+            torrents: flux_torrent::Tools::new(aria2_path(), flux_store::default_directory().join("torrents")),
             store: Mutex::new(store),
             settings: RwLock::new(settings),
             records: Mutex::new(records),
@@ -970,19 +970,43 @@ impl Manager {
     }
 }
 
-/// The bundled video tools: beside Flux when installed; in a development build, the repository's
-/// copy or the one Flux 1.x installed.
+fn program(dir: &Path, name: &str) -> PathBuf {
+    dir.join(format!("{name}{}", std::env::consts::EXE_SUFFIX))
+}
+
+/// The video tools: bundled beside Flux when installed (Linux packages: `../lib/flux`); in a
+/// development build, the repository's copy or the one Flux 1.x installed; on Linux and macOS,
+/// otherwise the system's own yt-dlp and FFmpeg.
 fn video_tools_directory() -> PathBuf {
     let exe = std::env::current_exe().ok().and_then(|p| p.parent().map(Path::to_path_buf)).unwrap_or_default();
-    let mut candidates = vec![exe.join("video-tools"), exe.join("../../../video-tools")];
+    let mut candidates = vec![exe.join("video-tools"), exe.join("../lib/flux/video-tools"), exe.join("../Resources/video-tools"), exe.join("../../../video-tools")];
     if let Some(local) = std::env::var_os("LOCALAPPDATA") {
         candidates.push(PathBuf::from(local).join("Programs").join("Apex Downloader").join("video-tools"));
     }
-    let complete = |dir: &PathBuf| ["yt-dlp.exe", "ffmpeg.exe", "ffprobe.exe"].iter().all(|n| dir.join(n).exists());
+    if !cfg!(windows) {
+        candidates.extend(std::env::var_os("PATH").map(|p| std::env::split_paths(&p).collect::<Vec<_>>()).unwrap_or_default());
+        candidates.extend(["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin"].map(PathBuf::from));
+    }
+    let complete = |dir: &PathBuf| ["yt-dlp", "ffmpeg", "ffprobe"].iter().all(|n| program(dir, n).exists());
     candidates.iter().find(|d| complete(d)).cloned().unwrap_or_else(|| candidates[0].clone())
 }
 
+/// aria2 for torrents: with the video tools, or the system's own.
+fn aria2_path() -> PathBuf {
+    let bundled = program(&video_tools_directory(), "aria2c");
+    if bundled.exists() || cfg!(windows) {
+        return bundled;
+    }
+    let path = std::env::var_os("PATH").map(|p| std::env::split_paths(&p).collect::<Vec<_>>()).unwrap_or_default();
+    path.iter().chain(&["/opt/homebrew/bin".into(), "/usr/local/bin".into(), "/usr/bin".into()]).map(|d| program(d, "aria2c")).find(|p| p.exists()).unwrap_or(bundled)
+}
+
 /// Windows' own VPN dialler, with the profile's saved credentials.
+#[cfg(not(windows))]
+async fn rasdial(_profile: &str, _disconnect: bool) -> Result<(), String> {
+    Err("Connecting a VPN from Flux is available on Windows only; connect it from your system's network settings.".into())
+}
+#[cfg(windows)]
 async fn rasdial(profile: &str, disconnect: bool) -> Result<(), String> {
     let mut command = tokio::process::Command::new("rasdial.exe");
     command.arg(profile).kill_on_drop(true);

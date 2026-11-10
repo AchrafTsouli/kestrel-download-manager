@@ -1,4 +1,5 @@
-//! Operating-system actions: open and reveal files, start with Windows, sounds, power actions, local time.
+//! Operating-system actions: open and reveal files, start with the system, sounds, power actions,
+//! local time. Windows, Linux and macOS.
 
 use std::path::Path;
 use std::process::Command;
@@ -24,16 +25,25 @@ pub fn open_path(path: &Path) -> Result<(), String> {
 /// Shows the file selected in its folder (or opens the folder when the file is gone).
 pub fn reveal(path: &Path) -> Result<(), String> {
     #[cfg(windows)]
-    {
-        if path.exists() {
-            Command::new("explorer").arg(format!("/select,{}", path.display())).spawn().map_err(|e| e.to_string())?;
-            return Ok(());
-        }
+    if path.exists() {
+        Command::new("explorer").arg(format!("/select,{}", path.display())).spawn().map_err(|e| e.to_string())?;
+        return Ok(());
+    }
+    #[cfg(target_os = "macos")]
+    if path.exists() {
+        Command::new("open").arg("-R").arg(path).spawn().map_err(|e| e.to_string())?;
+        return Ok(());
     }
     open_path(path.parent().unwrap_or(path))
 }
 
+#[cfg(unix)]
+fn home() -> std::path::PathBuf {
+    std::env::var_os("HOME").map(std::path::PathBuf::from).unwrap_or_default()
+}
+
 /// The Run value's name: the one Flux 1.x and its installer use, so there is only ever one.
+#[cfg(windows)]
 const RUN_VALUE: &str = "ApexDownloader";
 
 /// Starts Flux in the tray when the user signs in (Windows Run key of the current user).
@@ -50,8 +60,36 @@ pub fn set_autostart(enabled: bool) {
         };
         let _ = result;
     }
-    #[cfg(not(windows))]
-    let _ = enabled;
+    #[cfg(target_os = "macos")]
+    {
+        let plist = home().join("Library/LaunchAgents/com.achraftsouli.flux.plist");
+        if enabled {
+            let exe = std::env::current_exe().map(|p| p.display().to_string()).unwrap_or_default();
+            let text = format!(r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>Label</key><string>com.achraftsouli.flux</string>
+<key>ProgramArguments</key><array><string>{exe}</string><string>--background</string></array>
+<key>RunAtLoad</key><true/>
+</dict></plist>
+"#);
+            let _ = std::fs::create_dir_all(plist.parent().unwrap()).and_then(|_| std::fs::write(&plist, text));
+        } else {
+            let _ = std::fs::remove_file(plist);
+        }
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        let config = std::env::var_os("XDG_CONFIG_HOME").map(std::path::PathBuf::from).unwrap_or_else(|| home().join(".config"));
+        let entry = config.join("autostart/flux.desktop");
+        if enabled {
+            let exe = std::env::var_os("APPIMAGE").map(std::path::PathBuf::from).or_else(|| std::env::current_exe().ok()).map(|p| p.display().to_string()).unwrap_or_default();
+            let text = format!("[Desktop Entry]\nType=Application\nName=Flux\nExec=\"{exe}\" --background\nX-GNOME-Autostart-enabled=true\n");
+            let _ = std::fs::create_dir_all(entry.parent().unwrap()).and_then(|_| std::fs::write(&entry, text));
+        } else {
+            let _ = std::fs::remove_file(entry);
+        }
+    }
 }
 
 /// Holds the mutex the installer checks (`AppMutex`), so it asks to close a running Flux instead
@@ -79,8 +117,25 @@ pub fn power(action: AfterQueue) -> Result<(), String> {
         };
         Command::new("shutdown").args(args).spawn().map_err(|e| e.to_string())?;
     }
-    #[cfg(not(windows))]
-    let _ = action;
+    #[cfg(target_os = "macos")]
+    {
+        let command = match action {
+            AfterQueue::Shutdown => vec!["osascript", "-e", "tell application \"System Events\" to shut down"],
+            AfterQueue::Sleep | AfterQueue::Hibernate => vec!["pmset", "sleepnow"],
+            AfterQueue::Nothing | AfterQueue::Exit => return Ok(()),
+        };
+        Command::new(command[0]).args(&command[1..]).spawn().map_err(|e| e.to_string())?;
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        let verb = match action {
+            AfterQueue::Shutdown => "poweroff",
+            AfterQueue::Sleep => "suspend",
+            AfterQueue::Hibernate => "hibernate",
+            AfterQueue::Nothing | AfterQueue::Exit => return Ok(()),
+        };
+        Command::new("systemctl").arg(verb).spawn().map_err(|e| e.to_string())?;
+    }
     Ok(())
 }
 
@@ -91,8 +146,10 @@ pub fn sound(success: bool) {
         use windows_sys::Win32::UI::WindowsAndMessaging::{MB_ICONASTERISK, MB_ICONHAND};
         MessageBeep(if success { MB_ICONASTERISK } else { MB_ICONHAND });
     }
-    #[cfg(not(windows))]
-    let _ = success;
+    #[cfg(target_os = "macos")]
+    let _ = Command::new("afplay").arg(if success { "/System/Library/Sounds/Glass.aiff" } else { "/System/Library/Sounds/Basso.aiff" }).spawn();
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let _ = Command::new("canberra-gtk-play").args(["-i", if success { "complete" } else { "dialog-error" }]).spawn();
 }
 
 /// (weekday 0 = Sunday, "HH:MM") in local time.

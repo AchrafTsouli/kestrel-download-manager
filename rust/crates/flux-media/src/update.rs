@@ -22,6 +22,23 @@ pub fn verify_release_signature(data: &[u8], signature: &[u8]) -> Result<(), Str
     if valid { Ok(()) } else { Err("The yt-dlp release is not signed by yt-dlp's release key. The update was refused.".into()) }
 }
 
+/// yt-dlp's release file for this system.
+fn asset() -> &'static str {
+    if cfg!(windows) {
+        "yt-dlp.exe"
+    } else if cfg!(target_os = "macos") {
+        "yt-dlp_macos"
+    } else if cfg!(target_arch = "aarch64") {
+        "yt-dlp_linux_aarch64"
+    } else {
+        "yt-dlp_linux"
+    }
+}
+/// The name the updated copy is kept under ("yt-dlp.exe", or "yt-dlp").
+fn installed_name() -> String {
+    format!("yt-dlp{}", std::env::consts::EXE_SUFFIX)
+}
+
 /// A yt-dlp version ("2026.08.19" or "2026.08.19.1") as comparable numbers.
 pub fn parse_version(text: &str) -> Option<(u32, u32, u32, u32)> {
     let parts: Vec<&str> = text.trim().split('.').collect();
@@ -40,7 +57,7 @@ pub fn bundled_version(tools: &Path) -> Option<(u32, u32, u32, u32)> {
 }
 
 pub fn installed_version(update_dir: &Path) -> Option<(u32, u32, u32, u32)> {
-    if !update_dir.join("yt-dlp.exe").exists() {
+    if !update_dir.join(installed_name()).exists() {
         return None;
     }
     parse_version(&std::fs::read_to_string(update_dir.join("yt-dlp.version")).ok()?)
@@ -49,7 +66,7 @@ pub fn installed_version(update_dir: &Path) -> Option<(u32, u32, u32, u32)> {
 /// The updated copy when it is newer than the bundled one.
 pub fn preferred(tools: &Path, update_dir: &Path) -> Option<PathBuf> {
     let installed = installed_version(update_dir)?;
-    bundled_version(tools).is_none_or(|bundled| installed > bundled).then(|| update_dir.join("yt-dlp.exe"))
+    bundled_version(tools).is_none_or(|bundled| installed > bundled).then(|| update_dir.join(installed_name()))
 }
 
 async fn read(client: &reqwest::Client, url: &str, limit: usize) -> Result<Vec<u8>, String> {
@@ -82,18 +99,23 @@ pub async fn update(tools: &Path, update_dir: &Path) -> Result<Option<String>, S
     let expected = sums
         .lines()
         .filter_map(|line| line.trim().split_once(char::is_whitespace))
-        .find(|(_, name)| name.trim().trim_start_matches('*') == "yt-dlp.exe")
+        .find(|(_, name)| name.trim().trim_start_matches('*') == asset())
         .map(|(hash, _)| hash.to_ascii_lowercase())
         .filter(|hash| hash.len() == 64 && hash.bytes().all(|b| b.is_ascii_hexdigit()))
-        .ok_or("The release has no valid checksum for yt-dlp.exe.")?;
-    let executable = read(&client, &format!("{REPOSITORY}/download/{tag}/yt-dlp.exe"), 200 * 1024 * 1024).await?;
+        .ok_or("The release has no valid checksum for yt-dlp.")?;
+    let executable = read(&client, &format!("{REPOSITORY}/download/{tag}/{}", asset()), 200 * 1024 * 1024).await?;
     let actual: String = Sha256::digest(&executable).iter().map(|b| format!("{b:02x}")).collect();
     if actual != expected {
         return Err("The downloaded yt-dlp does not match its published checksum.".into());
     }
     std::fs::create_dir_all(update_dir).map_err(|e| e.to_string())?;
-    let staging = update_dir.join(format!("yt-dlp.{}.tmp.exe", std::process::id()));
+    let staging = update_dir.join(format!("yt-dlp.{}.tmp{}", std::process::id(), std::env::consts::EXE_SUFFIX));
     std::fs::write(&staging, &executable).map_err(|e| e.to_string())?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&staging, std::fs::Permissions::from_mode(0o755)).map_err(|e| e.to_string())?;
+    }
     // The copy must actually run and report the version it claims.
     let mut command = tokio::process::Command::new(&staging);
     command.arg("--version").kill_on_drop(true);
@@ -106,9 +128,9 @@ pub async fn update(tools: &Path, update_dir: &Path) -> Result<Option<String>, S
         return Err("The updated yt-dlp did not report the expected version.".into());
     }
     // The copy in use stays as yt-dlp.previous.exe (with its version) until the next update.
-    let current = update_dir.join("yt-dlp.exe");
+    let current = update_dir.join(installed_name());
     if current.exists() {
-        let _ = std::fs::rename(&current, update_dir.join("yt-dlp.previous.exe"));
+        let _ = std::fs::rename(&current, update_dir.join(format!("yt-dlp.previous{}", std::env::consts::EXE_SUFFIX)));
         let _ = std::fs::rename(update_dir.join("yt-dlp.version"), update_dir.join("yt-dlp.previous.version"));
     }
     std::fs::rename(&staging, &current).map_err(|e| {
@@ -154,11 +176,11 @@ mod tests {
         std::fs::create_dir_all(&updates).unwrap();
         std::fs::write(tools.join("sources.json"), r#"{"ytDlp":{"version":"2026.08.19"}}"#).unwrap();
         assert_eq!(preferred(&tools, &updates), None);
-        std::fs::write(updates.join("yt-dlp.exe"), b"").unwrap();
+        std::fs::write(updates.join(installed_name()), b"").unwrap();
         std::fs::write(updates.join("yt-dlp.version"), "2026.08.19").unwrap();
         assert_eq!(preferred(&tools, &updates), None);
         std::fs::write(updates.join("yt-dlp.version"), "2026.09.02").unwrap();
-        assert_eq!(preferred(&tools, &updates), Some(updates.join("yt-dlp.exe")));
+        assert_eq!(preferred(&tools, &updates), Some(updates.join(installed_name())));
         let _ = std::fs::remove_dir_all(root);
     }
 }

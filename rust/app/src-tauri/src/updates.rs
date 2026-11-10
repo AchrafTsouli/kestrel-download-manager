@@ -44,6 +44,13 @@ pub async fn install(app: &AppHandle) -> Result<(), String> {
     if !flux_update::is_newer(&release.version, &current(app)) {
         return Err(format!("Flux {} is up to date.", current(app)));
     }
+    // The signed installer is for Windows; elsewhere the release page offers the packages.
+    #[cfg(not(windows))]
+    {
+        let _ = crate::system::open_path(std::path::Path::new("https://github.com/AchrafTsouli/flux-downloader/releases/latest"));
+        return Ok(());
+    }
+    #[cfg_attr(not(windows), allow(unreachable_code))]
     let _ = app.emit("message", format!("Downloading Flux {}…", release.version));
     let installer = flux_update::download_installer(&release).await?;
     manager.shutdown();

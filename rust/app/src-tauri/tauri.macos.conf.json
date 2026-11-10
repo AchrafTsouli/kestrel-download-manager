@@ -1,0 +1,10 @@
+{
+  "bundle": {
+    "targets": ["app", "dmg"],
+    "externalBin": ["binaries/flux-nmhost"],
+    "category": "Utility",
+    "macOS": {
+      "minimumSystemVersion": "11.0"
+    }
+  }
+}

@@ -36,7 +36,7 @@ async fn run(engine: &Engine, job: &mut Job) -> flux_engine::Result<Outcome> {
 async fn several_connections_produce_an_identical_file_without_a_part_file_left() {
     let server = LabServer::start().await.unwrap();
     let engine = engine();
-    let mut job = job(&server, "multi.bin", "size=12000003&seed=7", 6);
+    let mut job = job(&server, "multi.bin", "size=12000003&seed=7&slow_us=500", 6);
     let outcome = run(&engine, &mut job).await.unwrap();
     assert!(matches!(outcome, Outcome::Completed { bytes: 12000003, .. }));
     assert_eq!(std::fs::read(&job.destination).unwrap(), expected(12000003, 7));
@@ -48,7 +48,7 @@ async fn several_connections_produce_an_identical_file_without_a_part_file_left(
 async fn pause_keeps_progress_and_resume_continues_from_it() {
     let server = LabServer::start().await.unwrap();
     let engine = engine();
-    let mut job = job(&server, "pause.bin", "size=8000000&seed=3&slow_us=2000", 4);
+    let mut job = job(&server, "pause.bin", "size=8000000&seed=3&slow_us=8000", 4);
     let cancel = CancellationToken::new();
     let stopper = cancel.clone();
     let checkpoints = Arc::new(Mutex::new(0));

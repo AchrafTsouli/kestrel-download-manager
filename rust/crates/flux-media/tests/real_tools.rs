@@ -24,7 +24,7 @@ fn job(name: &str, selection: Selection) -> VideoJob {
 }
 
 async fn duration(tools: &Tools, file: &PathBuf) -> f64 {
-    let out = std::process::Command::new(tools.directory.join("ffprobe.exe")).args(["-v", "error", "-show_entries", "format=duration", "-of", "default=nw=1:nk=1"]).arg(file).output().unwrap();
+    let out = std::process::Command::new(tools.directory.join(format!("ffprobe{}", std::env::consts::EXE_SUFFIX))).args(["-v", "error", "-show_entries", "format=duration", "-of", "default=nw=1:nk=1"]).arg(file).output().unwrap();
     String::from_utf8_lossy(&out.stdout).trim().parse().unwrap()
 }
 

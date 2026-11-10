@@ -555,7 +555,7 @@ fn exit_app(app: AppHandle) {
 /// Registers this copy's browser bridge for Chrome, Edge and Brave (the installer does it too).
 #[tauri::command]
 async fn register_browsers() -> Result<String, String> {
-    let host = std::env::current_exe().map_err(|e| e.to_string())?.with_file_name("flux-nmhost.exe");
+    let host = std::env::current_exe().map_err(|e| e.to_string())?.with_file_name(format!("flux-nmhost{}", std::env::consts::EXE_SUFFIX));
     if !host.exists() {
         return Err("flux-nmhost.exe is missing beside Flux.".into());
     }
