@@ -1,6 +1,6 @@
 <script lang="ts">
   import { listen } from "@tauri-apps/api/event";
-  import { open as pickFile } from "@tauri-apps/plugin-dialog";
+  import { open as pickFile, save as saveFile } from "@tauri-apps/plugin-dialog";
   import { startDrag } from "@crabnebula/tauri-plugin-drag";
   import { onMount } from "svelte";
   import Icon from "./lib/Icon.svelte";
@@ -23,6 +23,8 @@
   let deleteFiles = $state(false);
   let renaming: { id: string; name: string } | null = $state(null);
   let about = $state(false);
+  let shortcuts = $state(false);
+  let submenu = $state<string | null>(null);
   type UpdateInfo = { current: string; version: string; available: boolean; signed: boolean; url: string };
   let update: UpdateInfo | null = $state(null);
   let installing = $state(false);
@@ -98,8 +100,11 @@
   });
 
   function keys(e: KeyboardEvent) {
-    const dialog = adding || confirmDelete || about || renaming || countdown;
-    if (dialog) { if (e.key === "Escape") { adding = false; confirmDelete = null; about = false; renaming = null; } return; }
+    const dialog = adding || confirmDelete || about || shortcuts || renaming || countdown;
+    if (dialog) { if (e.key === "Escape") { adding = false; confirmDelete = null; about = false; shortcuts = false; renaming = null; } return; }
+    if (e.key === "f" && e.ctrlKey) { e.preventDefault(); findBox(); return; }
+    if (e.key === "F3") { e.preventDefault(); findNext(); return; }
+    if (e.ctrlKey && (e.key === "+" || e.key === "=" || e.key === "-" || e.key === "0")) { e.preventDefault(); zoom(e.key === "0" ? 0 : e.key === "-" ? -1 : 1); return; }
     if ((e.target as HTMLElement).tagName === "INPUT") return;
     if (e.key === "Delete" && selected.size) askDelete([...selected]);
     else if (e.key === "Enter" && chosen.length === 1) activate(chosen[0]);
@@ -192,41 +197,141 @@
   }
   const actionName: Record<string, string> = { exit: "Kestrel will close", sleep: "The computer will sleep", hibernate: "The computer will hibernate", shutdown: "The computer will shut down" };
 
-  const menus: Record<string, { label: string; run?: () => void; disabled?: () => boolean; check?: () => boolean; key?: string; sep?: boolean }[]> = {
+  type MenuItem = { label: string; run?: () => void; disabled?: () => boolean; check?: () => boolean; key?: string; sep?: boolean; sub?: () => MenuItem[] };
+  const HOME = "https://github.com/AchrafTsouli/flux-downloader";
+  const web = (url: string) => { call("open_folder", { path: url }); menu = null; };
+  const linkPattern = /^(https?:\/\/|magnet:\?)\S+$/i;
+  // Opens the batch window with these links already filled in (the window reads them once).
+  function batchWith(links: string[]) {
+    try { localStorage.setItem("kestrel.batch", links.join("\n")); } catch {}
+    showWindow("batch");
+  }
+  async function batchFromClipboard() {
+    menu = null;
+    const text = await navigator.clipboard?.readText?.().catch(() => "") ?? "";
+    const links = text.split(/\s+/).filter((l) => linkPattern.test(l));
+    if (!links.length) { message = "The clipboard holds no download links."; return; }
+    batchWith(links);
+  }
+  async function exportList(idm: boolean) {
+    menu = null;
+    const path = await saveFile({ title: idm ? "Export to IDM export file" : "Export to text file", defaultPath: idm ? "downloads.ef2" : "downloads.txt", filters: idm ? [{ name: "IDM export file", extensions: ["ef2"] }] : [{ name: "Text file", extensions: ["txt"] }] });
+    if (typeof path !== "string") return;
+    const list = (selected.size > 1 ? chosen : downloads).map((d) => d.url);
+    try { await call("write_link_list", { path, urls: list, idm }); message = `Exported ${list.length} link${list.length === 1 ? "" : "s"}.`; } catch (e) { message = String(e); }
+  }
+  async function importList(idm: boolean) {
+    menu = null;
+    const path = await pickFile({ title: idm ? "Import from IDM export file" : "Import from text file", filters: idm ? [{ name: "IDM export file", extensions: ["ef2"] }] : [{ name: "Text file", extensions: ["txt", "lst", "csv"] }, { name: "All files", extensions: ["*"] }] });
+    if (typeof path !== "string") return;
+    try {
+      const links = await call<string[]>("read_link_list", { path });
+      if (links.length) batchWith(links); else message = "No download links in that file.";
+    } catch (e) { message = String(e); }
+  }
+  // Downloads > Find: the search box; Find next (F3): the next listed download matching it.
+  const findBox = () => { menu = null; const box = document.querySelector<HTMLInputElement>("input.search"); box?.focus(); box?.select(); };
+  function findNext() {
+    menu = null;
+    if (!search.trim()) { findBox(); return; }
+    if (!visible.length) { message = `Nothing matches “${search}”.`; return; }
+    const at = visible.findIndex((d) => selected.has(d.id));
+    const next = visible[(at + 1) % visible.length];
+    selected = new Set([next.id]); anchor = next.id;
+    requestAnimationFrame(() => document.querySelector("tr.sel")?.scrollIntoView({ block: "nearest" }));
+  }
+  // Speed limiter: on/off keeps the last limit chosen in Options.
+  function limiter(on: boolean) {
+    if (!settings) return;
+    let last = 0;
+    try { last = Number(localStorage.getItem("kestrel.limit")) || 0; } catch {}
+    if (!on && settings.speedLimit > 0) try { localStorage.setItem("kestrel.limit", String(settings.speedLimit)); } catch {}
+    const speedLimit = on ? (last || 1024 * 1024) : 0;
+    call("save_settings", { settings: { ...settings, speedLimit } });
+    message = on ? `Speed limiter on: ${size(speedLimit)}/s for all downloads.` : "Speed limiter off.";
+  }
+  const sizes = [80, 90, 100, 110, 125, 150, 175, 200];
+  function zoom(step: number) {
+    if (!settings) return;
+    const at = sizes.indexOf(Number(settings.interfaceSize) || 100);
+    const interfaceSize = step === 0 ? 100 : sizes[Math.min(sizes.length - 1, Math.max(0, (at < 0 ? 2 : at) + step))];
+    call("save_settings", { settings: { ...settings, interfaceSize } });
+  }
+  const queueItems = (starting: boolean): MenuItem[] => queues.length
+    ? queues.map((q: { name: string }) => ({ label: q.name, run: () => toggleQueue(q.name), disabled: () => runningQueues.includes(q.name) !== !starting }))
+    : [{ label: "No queues", disabled: () => true }];
+  const tellFriend = () => { navigator.clipboard?.writeText(`Kestrel, a free download manager: ${HOME}`); message = "Link to Kestrel copied. Paste it to a friend."; menu = null; };
+
+  const menus: Record<string, MenuItem[]> = {
     Tasks: [
       { label: "Add new download", key: "Ctrl+N", run: openAdd },
-      { label: "Add batch download", run: () => showWindow("batch") },
       { label: "Open torrent file…", run: openTorrentFile },
+      { label: "Add magnet link…", run: openAdd },
+      { label: "Torrent settings…", run: () => showWindow("options") },
+      { label: "Add batch download", sep: true, run: () => showWindow("batch") },
+      { label: "Add batch download from clipboard", run: batchFromClipboard },
+      { label: "Download video from a page…", sep: true, run: openAdd },
+      { label: "Link grabber…", run: () => showWindow("grabber") },
+      { label: "Export", sep: true, sub: () => [
+        { label: "To IDM export file…", run: () => exportList(true) },
+        { label: "To text file…", run: () => exportList(false) },
+      ] },
+      { label: "Import", sub: () => [
+        { label: "From IDM export file…", run: () => importList(true) },
+        { label: "From text file…", run: () => importList(false) },
+      ] },
       { label: "Exit", sep: true, run: () => call("exit_app") },
     ],
     File: [
       { label: "Open", key: "Enter", run: () => chosen[0] && openFile(chosen[0]), disabled: () => chosen.length !== 1 || chosen[0].status !== "Completed" },
+      { label: "Open with…", run: () => chosen[0] && call("open_with", { id: chosen[0].id }).catch((e) => (message = String(e))), disabled: () => chosen.length !== 1 || chosen[0].status !== "Completed" },
       { label: "Open folder", run: () => chosen[0] && showFolder(chosen[0]), disabled: () => chosen.length !== 1 },
       { label: "Show progress", run: () => chosen[0] && call("show_progress", { id: chosen[0].id }), disabled: () => chosen.length !== 1 },
+      { label: "Copy address", run: () => { navigator.clipboard?.writeText(chosen.map((d) => d.url).join("\n")); menu = null; }, disabled: () => !chosen.length },
       { label: "Stop download", sep: true, run: stop, disabled: () => !canStop },
-      { label: "Download now / Resume", run: resume, disabled: () => !canResume },
+      { label: "Download now", run: resume, disabled: () => !canResume },
       { label: "Redownload", run: () => chosen[0] && call("redownload", { id: chosen[0].id }), disabled: () => chosen.length !== 1 },
       { label: "Rename", run: () => chosen[0] && (renaming = { id: chosen[0].id, name: chosen[0].name }), disabled: () => chosen.length !== 1 || running(chosen[0].status) },
       { label: "Remove", key: "Del", sep: true, run: () => askDelete(ids()), disabled: () => selected.size === 0 },
+      { label: "Remove with files", run: () => { const list = ids(); menu = null; if (list.length) { confirmDelete = list; deleteFiles = true; } }, disabled: () => selected.size === 0 },
     ],
     Downloads: [
       { label: "Pause all", run: () => call("pause_all") },
+      { label: "Stop all", run: () => call("pause_all"), disabled: () => !downloads.some((d) => running(d.status)) },
       { label: "Resume all", run: () => call("resume_all") },
-      { label: "Delete all completed", run: deleteCompleted },
-      { label: "Start main queue", sep: true, run: () => toggleQueue("Main download queue"), disabled: () => runningQueues.includes("Main download queue") },
-      { label: "Stop main queue", run: () => toggleQueue("Main download queue"), disabled: () => !runningQueues.includes("Main download queue") },
-      { label: "Site grabber…", sep: true, run: () => showWindow("grabber") },
-      { label: "Scheduler", run: () => showWindow("scheduler") },
-      { label: "Options", run: () => showWindow("options") },
+      { label: "Delete all completed", run: deleteCompleted, disabled: () => !downloads.some((d) => d.status === "Completed") },
+      { label: "Find", key: "Ctrl+F", sep: true, run: findBox },
+      { label: "Find next", key: "F3", run: findNext },
+      { label: "Select all", key: "Ctrl+A", run: () => { selected = new Set(visible.map((d) => d.id)); menu = null; } },
+      { label: "Scheduler", sep: true, run: () => showWindow("scheduler") },
+      { label: "Start queue", sub: () => queueItems(true) },
+      { label: "Stop queue", sub: () => queueItems(false) },
+      { label: "Speed limiter", sep: true, sub: () => [
+        { label: "Turn on", check: () => (settings?.speedLimit ?? 0) > 0, run: () => limiter(true), disabled: () => (settings?.speedLimit ?? 0) > 0 },
+        { label: "Turn off", run: () => limiter(false), disabled: () => !settings?.speedLimit },
+        { label: "Settings…", sep: true, run: () => showWindow("options") },
+      ] },
+      { label: "Site grabber…", run: () => showWindow("grabber") },
+      { label: "Options", sep: true, run: () => showWindow("options") },
     ],
     View: [
       { label: "Categories", check: () => showCategories, run: () => (showCategories = !showCategories) },
       { label: "Toolbar", check: () => showToolbar, run: () => (showToolbar = !showToolbar) },
-      { label: "Dark mode", check: () => settings?.theme !== "light", run: () => { if (settings) call("save_settings", { settings: { ...settings, theme: settings.theme === "light" ? "dark" : "light" } }); } },
+      { label: "Dark mode", sep: true, check: () => settings?.theme !== "light", run: () => { if (settings) call("save_settings", { settings: { ...settings, theme: settings.theme === "light" ? "dark" : "light" } }); } },
+      { label: "Interface size", sub: () => [
+        { label: "Larger", key: "Ctrl++", run: () => zoom(1) },
+        { label: "Smaller", key: "Ctrl+-", run: () => zoom(-1) },
+        { label: `Normal (now ${settings?.interfaceSize ?? 100} %)`, key: "Ctrl+0", run: () => zoom(0) },
+      ] },
+      { label: "Language…", run: () => showWindow("options") },
     ],
     Help: [
-      { label: "Kestrel on GitHub", run: () => call("open_folder", { path: "https://github.com/AchrafTsouli/flux-downloader" }) },
-      { label: "Check for updates", run: checkUpdates },
+      { label: "Help contents", run: () => web(`${HOME}#readme`) },
+      { label: "Keyboard shortcuts", run: () => { shortcuts = true; menu = null; } },
+      { label: "Home page", sep: true, run: () => web(HOME) },
+      { label: "Report a problem", run: () => web(`${HOME}/issues/new`) },
+      { label: "Check for updates…", run: checkUpdates },
+      { label: "Tell a friend", sep: true, run: tellFriend },
       { label: "About Kestrel", run: () => { about = true; menu = null; } },
     ],
   };
@@ -241,9 +346,27 @@
           <div class="dropdown" role="menu">
             {#each menus[name] as item}
               {#if item.sep}<div class="sep"></div>{/if}
-              <button role="menuitem" class="menu-item" disabled={item.disabled?.()} onclick={() => { item.run?.(); if (name !== "View") menu = null; }}>
-                <span class="tick">{item.check?.() ? "✓" : ""}</span>{item.label}<span class="key">{item.key ?? ""}</span>
-              </button>
+              {#if item.sub}
+                <div class="sub-root" role="none" onmouseenter={() => (submenu = item.label)} onmouseleave={() => (submenu = null)}>
+                  <button role="menuitem" aria-haspopup="menu" class="menu-item" class:hot={submenu === item.label} onclick={() => (submenu = item.label)}>
+                    <span class="tick"></span>{item.label}<span class="key">▸</span>
+                  </button>
+                  {#if submenu === item.label}
+                    <div class="dropdown flyout" role="menu">
+                      {#each item.sub() as child}
+                        {#if child.sep}<div class="sep"></div>{/if}
+                        <button role="menuitem" class="menu-item" disabled={child.disabled?.()} onclick={() => { child.run?.(); menu = null; submenu = null; }}>
+                          <span class="tick">{child.check?.() ? "✓" : ""}</span>{child.label}<span class="key">{child.key ?? ""}</span>
+                        </button>
+                      {/each}
+                    </div>
+                  {/if}
+                </div>
+              {:else}
+                <button role="menuitem" class="menu-item" disabled={item.disabled?.()} onmouseenter={() => (submenu = null)} onclick={() => { item.run?.(); if (name !== "View") menu = null; }}>
+                  <span class="tick">{item.check?.() ? "✓" : ""}</span>{item.label}<span class="key">{item.key ?? ""}</span>
+                </button>
+              {/if}
             {/each}
           </div>
         {/if}
@@ -438,6 +561,25 @@
   </div>
 {/if}
 
+{#if shortcuts}
+  <div class="scrim" role="presentation" onmousedown={(e) => e.target === e.currentTarget && (shortcuts = false)}>
+    <div class="dialog small" role="dialog" aria-labelledby="keys-title">
+      <div class="dialog-title" id="keys-title">Keyboard shortcuts</div>
+      <div class="dialog-body shortcuts">
+        <kbd>Ctrl+N</kbd><span>Add new download</span>
+        <kbd>Enter</kbd><span>Open the file, or show its progress</span>
+        <kbd>Del</kbd><span>Remove the selected downloads</span>
+        <kbd>Ctrl+A</kbd><span>Select all</span>
+        <kbd>Ctrl+F</kbd><span>Find</span>
+        <kbd>F3</kbd><span>Find next</span>
+        <kbd>Ctrl+ +/−/0</kbd><span>Interface size larger, smaller, normal</span>
+        <kbd>Esc</kbd><span>Close a menu or dialog</span>
+      </div>
+      <div class="dialog-actions"><button class="btn primary" onclick={() => (shortcuts = false)}>OK</button></div>
+    </div>
+  </div>
+{/if}
+
 {#if about}
   <div class="scrim" role="presentation" onmousedown={(e) => e.target === e.currentTarget && (about = false)}>
     <div class="dialog small" role="dialog" aria-labelledby="about-title">
@@ -455,9 +597,14 @@
   .menu-root { position: relative; }
   .menu-title { height: 22px; padding: 0 9px; border: 0; border-radius: 3px; background: transparent; cursor: default; }
   .menu-title:hover, .menu-title.open { background: var(--raised); }
-  .dropdown { position: absolute; top: 24px; left: 0; z-index: 30; min-width: 230px; padding: 4px; background: var(--menu); border: 1px solid var(--line); border-radius: 6px; box-shadow: 0 10px 28px rgb(0 0 0 / 0.35); display: grid; }
+  .dropdown { position: absolute; top: 24px; left: 0; z-index: 30; min-width: 230px; width: max-content; padding: 4px; background: var(--menu); border: 1px solid var(--line); border-radius: 6px; box-shadow: 0 10px 28px rgb(0 0 0 / 0.35); display: grid; }
+  .sub-root { position: relative; display: grid; }
+  .dropdown.flyout { top: -5px; left: calc(100% + 2px); }
+  .menu-item.hot { background: var(--hover, rgb(127 127 127 / 0.15)); }
+  .shortcuts { display: grid; grid-template-columns: auto 1fr; gap: 6px 18px; }
+  .shortcuts kbd { font: inherit; font-weight: 600; white-space: nowrap; }
   .dropdown.sub { top: auto; left: 100%; margin-top: -60px; }
-  .menu-item { display: grid; grid-template-columns: 18px 1fr auto; align-items: center; gap: 4px; height: 26px; padding: 0 10px 0 4px; border: 0; border-radius: 4px; background: transparent; text-align: left; cursor: default; }
+  .menu-item { display: grid; grid-template-columns: 18px 1fr auto; align-items: center; gap: 4px; white-space: nowrap; height: 26px; padding: 0 10px 0 4px; border: 0; border-radius: 4px; background: transparent; text-align: left; cursor: default; }
   .menu-item:hover:not(:disabled) { background: var(--selection); color: var(--selection-text); }
   .menu-item:disabled { color: var(--muted); opacity: 0.55; }
   .menu-item.danger:hover { background: color-mix(in srgb, var(--bad) 28%, transparent); }

@@ -458,6 +458,30 @@ async fn video_as_file(app: AppHandle, windows: State<'_, Windows>, id: String) 
     request.video = None;
     offer(&app, request, true).map(|_| ())
 }
+/// Tasks > Export: the addresses, one per line, or as an IDM export file (.ef2).
+#[tauri::command]
+fn write_link_list(path: String, urls: Vec<String>, idm: bool) -> Result<(), String> {
+    let text: String = if idm { urls.iter().map(|u| format!("<\r\n{u}\r\n>\r\n")).collect() } else { urls.iter().map(|u| format!("{u}\r\n")).collect() };
+    std::fs::write(&path, text).map_err(|e| e.to_string())
+}
+/// Tasks > Import: the download links found in a text or IDM export file.
+#[tauri::command]
+fn read_link_list(path: String) -> Result<Vec<String>, String> {
+    let meta = std::fs::metadata(&path).map_err(|e| e.to_string())?;
+    if meta.len() > 16 * 1024 * 1024 {
+        return Err("That file is too large to be a list of links.".into());
+    }
+    let bytes = std::fs::read(&path).map_err(|e| e.to_string())?;
+    Ok(links_in(&String::from_utf8_lossy(&bytes)))
+}
+fn links_in(text: &str) -> Vec<String> {
+    let mut seen = std::collections::HashSet::new();
+    text.split_whitespace()
+        .filter(|w| { let l = w.to_ascii_lowercase(); l.starts_with("http://") || l.starts_with("https://") || l.starts_with("magnet:?") })
+        .filter(|w| seen.insert(w.to_string()))
+        .map(str::to_string)
+        .collect()
+}
 #[tauri::command]
 fn add_downloads(manager: Mgr, urls: Vec<String>, start: String) -> Vec<Result<String, String>> {
     urls.into_iter().map(|url| manager.add(AddRequest { url, start: Some(start.clone()), ..Default::default() })).collect()
@@ -885,7 +909,7 @@ pub fn run() {
             list_downloads, get_download, get_settings, save_settings, offer_url, get_pending, confirm_pending, cancel_pending,
             probe_video, video_exact_cut, confirm_video, video_as_file, load_torrent, confirm_torrent, open_torrent_file, check_updates, install_update, drag_item, grab_site, run_waiting, register_browsers, test_browsers, set_after_complete, get_after_complete, open_with, to_background, crash_reports, dismiss_crash, report_crash,
             add_downloads, pause_downloads, resume_downloads, pause_all, resume_all, remove_downloads, remove_completed,
-            rename_download, redownload, set_speed_limit, set_queue, enqueue, start_queue, stop_queue, running_queues,
+            rename_download, redownload, write_link_list, read_link_list, set_speed_limit, set_queue, enqueue, start_queue, stop_queue, running_queues,
             open_file, show_in_folder, open_folder, show_progress, show_window, power_action, exit_app, app_version
         ])
         .run(tauri::generate_context!())

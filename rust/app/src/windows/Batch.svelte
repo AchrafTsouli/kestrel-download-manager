@@ -10,11 +10,20 @@
   let width = $state(1);
   let result = $state("");
   const win = getCurrentWindow();
-  onMount(() => { call<Settings>("get_settings").then((s) => applyTheme(s.theme)); });
+  // Links handed over by the main window (Tasks > batch from clipboard, Import).
+  function takeLinks() {
+    try { const t = localStorage.getItem("kestrel.batch"); if (t) { localStorage.removeItem("kestrel.batch"); text = text.trim() ? text.trim() + "\n" + t : t; } } catch {}
+  }
+  onMount(() => {
+    call<Settings>("get_settings").then((s) => applyTheme(s.theme));
+    takeLinks();
+    const unlisten = win.onFocusChanged(({ payload }) => payload && takeLinks());
+    return () => { unlisten.then((f) => f()); };
+  });
 
   // Links typed or pasted (one per line), plus an optional numbered series: https://site/file_*.zip
   const links = $derived.by(() => {
-    const list = text.split(/\s+/).filter((l) => /^https?:\/\//i.test(l));
+    const list = text.split(/\s+/).filter((l) => /^(https?:\/\/|magnet:\?)/i.test(l));
     if (pattern.includes("*") && /^https?:\/\//i.test(pattern) && to >= from && to - from < 5000)
       for (let n = from; n <= to; n++) list.push(pattern.replace("*", String(n).padStart(width, "0")));
     return [...new Set(list)];
