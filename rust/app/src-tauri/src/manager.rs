@@ -456,7 +456,10 @@ impl Manager {
             };
             let result = match result {
                 Ok(Outcome::Completed { path, bytes, sha256 }) => match manager.scan(&path).await {
-                    Ok(()) => Ok(Outcome::Completed { path, bytes, sha256 }),
+                    Ok(()) => {
+                        manager.unpack(&id, &path).await;
+                        Ok(Outcome::Completed { path, bytes, sha256 })
+                    }
                     Err(error) => Err(flux_engine::Error::protocol(error)),
                 },
                 other => other,
@@ -592,6 +595,37 @@ impl Manager {
         blocked.push(".blocked");
         let _ = std::fs::rename(path, &blocked);
         Err(format!("The virus scanner reported a problem (exit code {}). The file was kept as {}.", status.code().unwrap_or(-1), Path::new(&blocked).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()))
+    }
+
+    /// Unpacks a finished archive when enabled in Options. Its result is told in the main window;
+    /// a failure leaves the archive as it is and does not fail the download.
+    async fn unpack(&self, id: &str, path: &Path) {
+        let (wanted, delete) = {
+            let s = self.settings.read().unwrap();
+            (s.extract_archives, s.delete_extracted_archives)
+        };
+        if !wanted || !crate::extract::is_archive(path) {
+            return;
+        }
+        if let Some(live) = self.live.lock().unwrap().get_mut(id) {
+            live.info.phase = Some("Unpacking the archive".into());
+            live.info.phase_fraction = None;
+        }
+        self.update(id, |r| r.status = Status::Finishing);
+        self.emit(id);
+        let archive = path.to_path_buf();
+        let name = archive.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        let message = match tokio::task::spawn_blocking(move || crate::extract::extract(&archive)).await {
+            Ok(Ok((folder, what))) => {
+                if delete {
+                    let _ = std::fs::remove_file(path);
+                }
+                format!("{name}: {what} unpacked into {}.", folder.display())
+            }
+            Ok(Err(error)) => format!("{name} was not unpacked: {error}"),
+            Err(error) => format!("{name} was not unpacked: {error}"),
+        };
+        let _ = self.app.emit("message", message);
     }
 
     /// Dials the chosen Windows VPN before a download starts (once; it stays up).

@@ -263,6 +263,10 @@ pub struct Settings {
     pub vpn_profile: String,
     pub connect_vpn: bool,
     pub disconnect_vpn_when_idle: bool,
+    /// Unpack finished archives into a folder beside them.
+    pub extract_archives: bool,
+    /// …and delete the archive once it is unpacked.
+    pub delete_extracted_archives: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -379,6 +383,8 @@ impl Default for Settings {
             vpn_profile: String::new(),
             connect_vpn: false,
             disconnect_vpn_when_idle: false,
+            extract_archives: false,
+            delete_extracted_archives: false,
         }
     }
 }

@@ -2,6 +2,7 @@
 
 mod bridge;
 mod desktop;
+mod extract;
 mod i18n;
 mod manager;
 mod media;

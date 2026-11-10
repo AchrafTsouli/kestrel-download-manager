@@ -333,6 +333,9 @@
   "{} peers · {} seeders": "{} pairs · {} sources complètes",
   "Ready.": "Prêt.",
   "Synchronization queue": "File de synchronisation",
+  "Unpack archives (zip, 7z, rar) into a folder when they finish": "Décompresser les archives (zip, 7z, rar) dans un dossier une fois terminées",
+  "Then delete the archive": "Puis supprimer l'archive",
+  "Unpacking the archive…": "Décompression de l'archive…",
   "Options saved.": "Options enregistrées.",
   "Su": "Di", "Mo": "Lu", "Tu": "Ma", "We": "Me", "Th": "Je", "Fr": "Ve", "Sa": "Sa"
 }

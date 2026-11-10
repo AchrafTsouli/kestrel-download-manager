@@ -17,7 +17,7 @@ export type Settings = {
   updateFeed: string; autoCheckUpdates: boolean; autoUpdateTools: boolean; lastUpdateCheckMs: number; captureExtensions: string;
   captureEnabled: boolean; videoPanel: boolean; excludedSites: string; columns: string[];
   siteLogins: SiteLogin[]; rules: Rule[]; virusScanner: string; virusScannerArgs: string;
-  vpnProfile: string; connectVpn: boolean; disconnectVpnWhenIdle: boolean;
+  vpnProfile: string; connectVpn: boolean; disconnectVpnWhenIdle: boolean; extractArchives: boolean; deleteExtractedArchives: boolean;
 };
 export type SiteLogin = { enabled: boolean; origin: string; username: string; password: string };
 export type Rule = {

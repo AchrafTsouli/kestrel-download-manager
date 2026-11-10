@@ -333,6 +333,9 @@
   "{} peers · {} seeders": "{} نظير · {} مصدر كامل",
   "Ready.": "جاهز.",
   "Synchronization queue": "طابور المزامنة",
+  "Unpack archives (zip, 7z, rar) into a folder when they finish": "فك ضغط الأرشيفات (zip وrar و7z) في مجلد عند اكتمالها",
+  "Then delete the archive": "ثم حذف الأرشيف",
+  "Unpacking the archive…": "جارٍ فك ضغط الأرشيف…",
   "Options saved.": "تم حفظ الخيارات.",
   "Su": "أحد", "Mo": "إثن", "Tu": "ثلا", "We": "أرب", "Th": "خمي", "Fr": "جمع", "Sa": "سبت"
 }

@@ -68,6 +68,8 @@
           <div class="form">
             <label for="retries">Retries</label><input id="retries" class="input short" type="number" min="0" max="20" bind:value={s.maxRetries} />
           </div>
+          <label class="check"><input type="checkbox" bind:checked={s.extractArchives} /> Unpack archives (zip, 7z, rar) into a folder when they finish</label>
+          <label class="check indent"><input type="checkbox" bind:checked={s.deleteExtractedArchives} disabled={!s.extractArchives} /> Then delete the archive</label>
           <fieldset class="group">
             <legend>Virus scan</legend>
             <div class="form">
@@ -194,6 +196,7 @@
 </div>
 
 <style>
+  .indent { padding-inline-start: 22px; }
   .layout { display: grid; grid-template-columns: 150px 1fr; min-height: 0; }
   .tabs { display: flex; flex-direction: column; padding: 10px 6px; gap: 2px; background: var(--chrome); border-right: 1px solid var(--line); }
   .tab { text-align: left; height: 28px; padding: 0 10px; border: 0; border-radius: 4px; background: transparent; cursor: default; }
