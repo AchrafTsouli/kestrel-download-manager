@@ -331,6 +331,8 @@
   "Sharing the finished files…": "Partage des fichiers terminés…",
   "Finding people who share this torrent…": "Recherche de personnes qui partagent ce torrent…",
   "{} peers · {} seeders": "{} pairs · {} sources complètes",
+  "Ready.": "Prêt.",
+  "Synchronization queue": "File de synchronisation",
   "Options saved.": "Options enregistrées.",
   "Su": "Di", "Mo": "Lu", "Tu": "Ma", "We": "Me", "Th": "Je", "Fr": "Ve", "Sa": "Sa"
 }

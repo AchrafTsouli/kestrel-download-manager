@@ -331,6 +331,8 @@
   "Sharing the finished files…": "جارٍ مشاركة الملفات المكتملة…",
   "Finding people who share this torrent…": "جارٍ البحث عمن يشارك هذا التورنت…",
   "{} peers · {} seeders": "{} نظير · {} مصدر كامل",
+  "Ready.": "جاهز.",
+  "Synchronization queue": "طابور المزامنة",
   "Options saved.": "تم حفظ الخيارات.",
   "Su": "أحد", "Mo": "إثن", "Tu": "ثلا", "We": "أرب", "Th": "خمي", "Fr": "جمع", "Sa": "سبت"
 }
