@@ -164,7 +164,13 @@
   const ids = () => [...selected];
   const resume = () => call("resume_downloads", { ids: ids() });
   const stop = () => call("pause_downloads", { ids: ids() });
-  function askDelete(list: string[]) { if (list.length) { confirmDelete = list; deleteFiles = false; menu = null; context = null; } }
+  function askDelete(list: string[]) {
+    if (!list.length) return;
+    menu = null; context = null;
+    // Options > General > "Confirm before deleting downloads" off: removed from the list at once (files kept).
+    if (settings && !settings.confirmDelete) { call("remove_downloads", { ids: list, deleteFiles: false }); return; }
+    confirmDelete = list; deleteFiles = false;
+  }
   async function doDelete() { if (confirmDelete) await call("remove_downloads", { ids: confirmDelete, deleteFiles }); confirmDelete = null; }
   async function deleteCompleted() { const removed = await call<string[]>("remove_completed"); message = `Removed ${removed.length} completed download${removed.length === 1 ? "" : "s"} from the list.`; menu = null; }
   async function openFile(d: Download) { try { await call("open_file", { id: d.id }); } catch (e) { message = String(e); } }

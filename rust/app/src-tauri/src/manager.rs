@@ -166,12 +166,12 @@ impl Manager {
     }
     /// Proxy and browser identity for the engine, yt-dlp and aria2.
     fn apply_network(&self, settings: &Settings) -> Result<(), String> {
-        let proxy = (!settings.proxy.trim().is_empty()).then(|| flux_engine::Proxy {
+        let proxy = (settings.proxy_mode == 2 && !settings.proxy.trim().is_empty()).then(|| flux_engine::Proxy {
             url: settings.proxy.trim().to_string(),
             username: settings.proxy_username.clone(),
             password: settings.proxy_password.clone(),
         });
-        self.engine.set_network(proxy.as_ref(), Some(settings.user_agent.as_str()))?;
+        self.engine.set_network_with(proxy.as_ref(), Some(settings.user_agent.as_str()), settings.proxy_mode == 1)?;
         let with_credentials = match &proxy {
             Some(p) => Some(p.with_credentials()?),
             None => None,
@@ -311,7 +311,14 @@ impl Manager {
             .or_else(|| rule_text(|r| &r.folder).map(PathBuf::from).filter(|p| p.is_absolute()))
             .unwrap_or_else(|| self.folder_for(&category));
         std::fs::create_dir_all(&folder).map_err(|e| format!("The folder could not be created: {e}"))?;
-        let destination = self.unique(&folder, &name);
+        // A file of that name already there: a numbered copy, overwrite it, or leave it.
+        let plain = folder.join(&name);
+        let taken_by_a_download = self.records.lock().unwrap().iter().any(|r| r.destination == plain && r.status != Status::Completed);
+        let destination = match self.settings.read().unwrap().duplicate_action {
+            1 if !taken_by_a_download => plain,
+            2 if plain.exists() => return Err(format!("{name} is already in {}; it was not downloaded again.", folder.display())),
+            _ => self.unique(&folder, &name),
+        };
         let settings = self.settings.read().unwrap().clone();
         let start = request.start.clone().unwrap_or_else(|| "now".into());
         let queue = request.queue.clone().or_else(|| rule_text(|r| &r.queue)).filter(|q| settings.queues.iter().any(|x| &x.name == q)).unwrap_or_else(|| MAIN_QUEUE.into());
@@ -460,6 +467,7 @@ impl Manager {
             let result = match result {
                 Ok(Outcome::Completed { path, bytes, sha256 }) => match manager.scan(&path).await {
                     Ok(()) => {
+                        manager.server_date(&path, job.resume.last_modified.as_deref());
                         manager.unpack(&id, &path).await;
                         Ok(Outcome::Completed { path, bytes, sha256 })
                     }
@@ -600,12 +608,24 @@ impl Manager {
         Err(format!("The virus scanner reported a problem (exit code {}). The file was kept as {}.", status.code().unwrap_or(-1), Path::new(&blocked).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()))
     }
 
+    /// Gives the finished file the server's date (Options > Save to), when the server sent one.
+    fn server_date(&self, path: &Path, last_modified: Option<&str>) {
+        if !self.settings.read().unwrap().set_creation_date {
+            return;
+        }
+        let Some(date) = last_modified.and_then(|d| chrono::DateTime::parse_from_rfc2822(d.trim()).ok()) else { return };
+        let time = std::time::UNIX_EPOCH + Duration::from_secs(date.timestamp().max(0) as u64);
+        if let Ok(file) = std::fs::OpenOptions::new().write(true).open(path) {
+            let _ = file.set_times(std::fs::FileTimes::new().set_modified(time).set_accessed(time));
+        }
+    }
+
     /// Unpacks a finished archive when enabled in Options. Its result is told in the main window;
     /// a failure leaves the archive as it is and does not fail the download.
     async fn unpack(&self, id: &str, path: &Path) {
-        let (wanted, delete) = {
+        let (wanted, delete, target) = {
             let s = self.settings.read().unwrap();
-            (s.extract_archives, s.delete_extracted_archives)
+            (s.extract_archives, s.delete_extracted_archives, s.archive_target)
         };
         if !wanted || !crate::extract::is_archive(path) {
             return;
@@ -618,10 +638,10 @@ impl Manager {
         self.emit(id);
         let archive = path.to_path_buf();
         let name = archive.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-        let message = match tokio::task::spawn_blocking(move || crate::extract::extract(&archive)).await {
+        let message = match tokio::task::spawn_blocking(move || crate::extract::extract(&archive, target)).await {
             Ok(Ok((folder, what))) => {
                 if delete {
-                    let _ = std::fs::remove_file(path);
+                    crate::extract::recycle(path);
                 }
                 format!("{name}: {what} unpacked into {}.", folder.display())
             }
@@ -854,6 +874,7 @@ impl Manager {
             let had_any = self.records.lock().unwrap().iter().any(|r| r.queue == queue.name && r.status == Status::Completed);
             if started && !active && had_any {
                 self.running_queues.lock().unwrap().remove(&queue.name);
+                if let Some(sound) = settings.sounds.get(3).filter(|s| s.on) { crate::system::play(&sound.file, true); }
                 let _ = self.app.emit("queue-finished", (queue.name.clone(), queue.after));
             }
         }

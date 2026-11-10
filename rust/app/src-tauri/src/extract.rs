@@ -66,8 +66,61 @@ fn seven_zip() -> Option<PathBuf> {
 }
 
 /// Unpacks `archive` into a new folder beside it. Returns the folder and what it holds.
-pub fn extract(archive: &Path) -> Result<(PathBuf, String), String> {
-    let into = target_folder(archive);
+/// Unpacks `archive`. `target`: 0 = into a folder named after it when it holds several things
+/// (a single file or folder lands beside the archive), 1 = always into such a folder, 2 = straight
+/// into the archive's folder (never over existing files).
+pub fn extract(archive: &Path, target: u8) -> Result<(PathBuf, String), String> {
+    let beside = archive.parent().unwrap_or(Path::new("")).to_path_buf();
+    let (into, made) = if target == 2 { (beside.clone(), false) } else { (target_folder(archive), true) };
+    let result = unpack(archive, &into);
+    match result {
+        Ok(what) if target == 0 => Ok((single_up(&into, &beside).unwrap_or(into), what)),
+        Ok(what) => Ok((into, what)),
+        Err(error) => {
+            // Leave nothing half-unpacked behind (only a folder Kestrel made).
+            if made {
+                let _ = std::fs::remove_dir_all(&into);
+            }
+            Err(error)
+        }
+    }
+}
+
+/// When the new folder holds one thing only, that thing moves up beside the archive.
+fn single_up(folder: &Path, beside: &Path) -> Option<PathBuf> {
+    let mut entries = std::fs::read_dir(folder).ok()?.flatten();
+    let only = entries.next()?;
+    if entries.next().is_some() {
+        return None;
+    }
+    let target = beside.join(only.file_name());
+    if target.exists() {
+        return None;
+    }
+    std::fs::rename(only.path(), &target).ok()?;
+    let _ = std::fs::remove_dir(folder);
+    Some(target)
+}
+
+/// Moves a file to the Recycle Bin (Windows), so an unpacked archive can still be brought back.
+pub fn recycle(path: &Path) {
+    #[cfg(windows)]
+    unsafe {
+        use windows_sys::Win32::UI::Shell::{FO_DELETE, FOF_ALLOWUNDO, FOF_NOCONFIRMATION, FOF_NOERRORUI, FOF_SILENT, SHFILEOPSTRUCTW, SHFileOperationW};
+        // A double-NUL-terminated list of one path.
+        let from: Vec<u16> = path.as_os_str().to_string_lossy().encode_utf16().chain([0, 0]).collect();
+        let mut op: SHFILEOPSTRUCTW = std::mem::zeroed();
+        op.wFunc = FO_DELETE;
+        op.pFrom = from.as_ptr();
+        op.fFlags = (FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_SILENT | FOF_NOERRORUI) as u16;
+        if SHFileOperationW(&mut op) == 0 {
+            return;
+        }
+    }
+    let _ = std::fs::remove_file(path);
+}
+
+fn unpack(archive: &Path, into: &Path) -> Result<String, String> {
     std::fs::create_dir_all(&into).map_err(|e| e.to_string())?;
     let lower = archive.to_string_lossy().to_ascii_lowercase();
     let result = if lower.ends_with(".zip") {
@@ -89,12 +142,8 @@ pub fn extract(archive: &Path) -> Result<(PathBuf, String), String> {
         }
     };
     match result {
-        Ok(what) => Ok((into, what)),
-        Err(error) => {
-            // Leave nothing half-unpacked behind.
-            let _ = std::fs::remove_dir_all(&into);
-            Err(error)
-        }
+        Ok(what) => Ok(what),
+        Err(error) => Err(error),
     }
 }
 
@@ -119,7 +168,7 @@ mod tests {
         let archive = dir.join("Course.zip");
         make_zip(&archive, &[("a.txt", b"one"), ("sub/b.txt", b"two")]);
         std::fs::create_dir_all(dir.join("Course")).unwrap(); // already taken: a new name is used
-        let (into, what) = extract(&archive).unwrap();
+        let (into, what) = extract(&archive, 1).unwrap();
         assert_eq!(into, dir.join("Course (1)"));
         assert_eq!(what, "2 files");
         assert_eq!(std::fs::read(into.join("sub").join("b.txt")).unwrap(), b"two");
@@ -132,7 +181,7 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let archive = dir.join("evil.zip");
         make_zip(&archive, &[("ok.txt", b"x"), ("../escaped.txt", b"bad")]);
-        assert!(extract(&archive).unwrap_err().contains("unsafe path"));
+        assert!(extract(&archive, 0).unwrap_err().contains("unsafe path"));
         assert!(!dir.join("escaped.txt").exists());
         assert!(!dir.join("evil").exists(), "nothing half-unpacked is left");
         let _ = std::fs::remove_dir_all(dir);

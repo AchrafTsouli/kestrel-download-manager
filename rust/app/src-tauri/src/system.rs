@@ -165,6 +165,19 @@ pub fn power(action: AfterQueue) -> Result<(), String> {
     Ok(())
 }
 
+/// Plays a chosen .wav file, or Windows' own sound when none is chosen (or it is missing).
+pub fn play(file: &str, success: bool) {
+    #[cfg(windows)]
+    if !file.trim().is_empty() && std::path::Path::new(file.trim()).is_file() {
+        use windows_sys::Win32::Media::Audio::{PlaySoundW, SND_ASYNC, SND_FILENAME, SND_NODEFAULT};
+        let wide: Vec<u16> = file.trim().encode_utf16().chain([0]).collect();
+        unsafe { PlaySoundW(wide.as_ptr(), std::ptr::null_mut(), SND_FILENAME | SND_ASYNC | SND_NODEFAULT) };
+        return;
+    }
+    let _ = file;
+    sound(success);
+}
+
 pub fn sound(success: bool) {
     #[cfg(windows)]
     unsafe {

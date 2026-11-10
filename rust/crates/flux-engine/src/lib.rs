@@ -69,7 +69,8 @@ impl Default for Options {
             retry_base: Duration::from_secs(2),
             max_retry_delay: Duration::from_secs(60),
             headers_timeout: Duration::from_secs(30),
-            read_timeout: Duration::from_secs(45),
+            // A connection that stays silent this long is dropped and its part handed on.
+            read_timeout: Duration::from_secs(20),
             checkpoint_every: Duration::from_secs(2),
         }
     }
@@ -168,7 +169,7 @@ impl Proxy {
     }
 }
 
-fn build_client(proxy: Option<&Proxy>) -> std::result::Result<Client, String> {
+fn build_client(proxy: Option<&Proxy>, system_proxy: bool) -> std::result::Result<Client, String> {
     let mut builder = Client::builder()
         // Separate TCP connections: with HTTP/2 every "connection" would share one socket.
         .http1_only()
@@ -186,8 +187,8 @@ fn build_client(proxy: Option<&Proxy>) -> std::result::Result<Client, String> {
             all = all.basic_auth(&proxy.username, &proxy.password);
         }
         builder = builder.proxy(all.no_proxy(reqwest::NoProxy::from_string("localhost,127.0.0.1,::1")));
-    } else {
-        // No proxy chosen in Flux: no system proxy guessing either.
+    } else if !system_proxy {
+        // No proxy chosen: no system proxy guessing either.
         builder = builder.no_proxy();
     }
     builder.build().map_err(|e| format!("The connection settings cannot be used: {e}"))
@@ -211,17 +212,22 @@ fn unsafe_redirect(attempt: &redirect::Attempt) -> bool {
 
 impl Engine {
     pub fn new(options: Options, host_limits: HostLimits) -> Engine {
-        let client = build_client(None).expect("HTTP client");
+        let client = build_client(None, false).expect("HTTP client");
         Engine { client: Arc::new(RwLock::new(client)), user_agent: Arc::new(RwLock::new(None)), options: Arc::new(options), host_limits, global_limiter: Limiter::default() }
     }
 
     /// Applies the connection settings to the downloads that start from now on.
     pub fn set_network(&self, proxy: Option<&Proxy>, user_agent: Option<&str>) -> std::result::Result<(), String> {
+        self.set_network_with(proxy, user_agent, false)
+    }
+
+    /// Like `set_network`; `system_proxy` uses Windows' proxy settings when no proxy is given.
+    pub fn set_network_with(&self, proxy: Option<&Proxy>, user_agent: Option<&str>, system_proxy: bool) -> std::result::Result<(), String> {
         let agent = match user_agent.map(str::trim).filter(|a| !a.is_empty()) {
             Some(agent) => Some(HeaderValue::from_str(agent).map_err(|_| "The browser identity contains characters a header cannot carry.")?),
             None => None,
         };
-        let client = build_client(proxy)?;
+        let client = build_client(proxy, system_proxy)?;
         *self.client.write().unwrap() = client;
         *self.user_agent.write().unwrap() = agent;
         Ok(())

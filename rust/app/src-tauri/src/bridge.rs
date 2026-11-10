@@ -81,7 +81,7 @@ async fn handle(app: &AppHandle, request: Request) -> Response {
         "resume-all" => { manager.resume_all(); Response::ok() }
         "capture-policy" => {
             let s = manager.settings();
-            Response { ok: true, policy: Some(CapturePolicy { enabled: s.capture_enabled, context_menu: true, extensions: s.capture_extensions, excluded_sites: s.excluded_sites, excluded_addresses: String::new(), bypass_key: "Alt".into(), force_key: "Shift".into(), media_panel: s.video_panel }), ..Default::default() }
+            Response { ok: true, policy: Some(CapturePolicy { enabled: s.capture_enabled, context_menu: true, extensions: s.capture_extensions, excluded_sites: s.excluded_sites, excluded_addresses: s.excluded_addresses, bypass_key: s.bypass_key, force_key: s.force_key, media_panel: s.video_panel }), ..Default::default() }
         }
         "pause" | "resume" => {
             let ids: Vec<String> = manager.views().into_iter().filter(|v| request.url.as_deref() == Some(v.url.as_str())).map(|v| v.id).collect();

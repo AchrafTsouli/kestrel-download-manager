@@ -211,9 +211,9 @@ fn capture_policy() -> Response {
             context_menu: true,
             extensions: text("captureExtensions", ""),
             excluded_sites: text("excludedSites", ""),
-            excluded_addresses: String::new(),
-            bypass_key: "Alt".into(),
-            force_key: "Shift".into(),
+            excluded_addresses: text("excludedAddresses", ""),
+            bypass_key: text("bypassKey", "Alt"),
+            force_key: text("forceKey", "Shift"),
             media_panel: flag("videoPanel"),
         }),
         ..Default::default()

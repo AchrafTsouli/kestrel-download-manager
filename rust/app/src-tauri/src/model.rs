@@ -269,6 +269,47 @@ pub struct Settings {
     pub category_dirs: std::collections::HashMap<String, PathBuf>,
     /// …and delete the archive once it is unpacked.
     pub delete_extracted_archives: bool,
+    // MDM / IDM options pages.
+    pub confirm_delete: bool,
+    /// Interface size in percent (80–200).
+    pub interface_size: u32,
+    /// Held while clicking a link: let the browser download it / make Kestrel take it.
+    pub bypass_key: String,
+    pub force_key: String,
+    /// Addresses (one per line, * wildcards) always left to the browser.
+    pub excluded_addresses: String,
+    pub set_creation_date: bool,
+    /// New downloads only join their queue (they start with it).
+    pub only_add_to_queue: bool,
+    /// A link whose file already exists: 0 = numbered copy, 1 = overwrite, 2 = do not download.
+    pub duplicate_action: u8,
+    /// Sounds for: download complete, download failed, queue started, queue finished.
+    pub sounds: Vec<Sound>,
+    /// "auto" (Windows), "dmy", "mdy", "ymd".
+    pub date_order: String,
+    /// "auto", "12" or "24".
+    pub clock: String,
+    /// 0 = Sunday … 6 = Saturday.
+    pub first_day: u8,
+    /// Where an unpacked archive goes: 0 = a folder when it holds several things, 1 = always a
+    /// folder, 2 = straight into the archive's folder.
+    pub archive_target: u8,
+    /// 0 = no proxy, 1 = Windows' proxy settings, 2 = the proxy below.
+    pub proxy_mode: u8,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct Sound {
+    pub on: bool,
+    /// A .wav file; empty = Windows' own sound.
+    pub file: String,
+}
+
+impl Default for Sound {
+    fn default() -> Self {
+        Sound { on: false, file: String::new() }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -387,6 +428,20 @@ impl Default for Settings {
             disconnect_vpn_when_idle: false,
             extract_archives: false,
             category_dirs: Default::default(),
+            confirm_delete: true,
+            interface_size: 100,
+            bypass_key: "Alt".into(),
+            force_key: "Shift".into(),
+            excluded_addresses: String::new(),
+            set_creation_date: false,
+            only_add_to_queue: false,
+            duplicate_action: 0,
+            sounds: vec![Sound { on: true, file: String::new() }, Sound { on: true, file: String::new() }, Sound::default(), Sound::default()],
+            date_order: "auto".into(),
+            clock: "auto".into(),
+            first_day: 1,
+            archive_target: 0,
+            proxy_mode: 2,
             delete_extracted_archives: false,
         }
     }

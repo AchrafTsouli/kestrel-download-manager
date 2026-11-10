@@ -33,6 +33,9 @@ export type Settings = {
   captureEnabled: boolean; videoPanel: boolean; excludedSites: string; columns: string[];
   siteLogins: SiteLogin[]; rules: Rule[]; virusScanner: string; virusScannerArgs: string;
   vpnProfile: string; connectVpn: boolean; disconnectVpnWhenIdle: boolean; extractArchives: boolean; deleteExtractedArchives: boolean;
+  categoryDirs: Record<string, string>; confirmDelete: boolean; interfaceSize: number; bypassKey: string; forceKey: string; excludedAddresses: string;
+  setCreationDate: boolean; onlyAddToQueue: boolean; duplicateAction: number; sounds: { on: boolean; file: string }[];
+  dateOrder: string; clock: string; firstDay: number; archiveTarget: number; proxyMode: number;
 };
 export type SiteLogin = { enabled: boolean; origin: string; username: string; password: string };
 export type Rule = {
@@ -63,10 +66,27 @@ export function clock(seconds: number) {
   const two = (n: number) => String(n).padStart(2, "0");
   return `${two(Math.floor(seconds / 3600))}:${two(Math.floor((seconds % 3600) / 60))}:${two(seconds % 60)}`;
 }
-export const stamp = (ms: number | null) => ms ? new Date(ms).toLocaleString(undefined, { month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false }) : "";
+// Options > Regional: how dates and times are written ("auto" follows Windows).
+export const regional = { dateOrder: "auto", clock: "auto" };
+export function stamp(ms: number | null) {
+  if (!ms) return "";
+  const d = new Date(ms);
+  const two = (n: number) => String(n).padStart(2, "0");
+  const hour12 = regional.clock === "12" ? true : regional.clock === "24" ? false : undefined;
+  const time = d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", hour12 });
+  const [day, month, year] = [two(d.getDate()), two(d.getMonth() + 1), String(d.getFullYear())];
+  const date = regional.dateOrder === "dmy" ? `${day}/${month}/${year}` : regional.dateOrder === "mdy" ? `${month}/${day}/${year}` : regional.dateOrder === "ymd" ? `${year}-${month}-${day}` : d.toLocaleDateString(undefined, { day: "2-digit", month: "short" });
+  return `${date} ${time}`;
+}
 export const statusText = (d: Download) => d.status === "Completed" ? (d.exists ? "Complete" : "File missing") : d.status === "Downloading" ? `${percent(d).toFixed(2)}%` : d.status;
 export const statusClass = (d: Download) => d.status === "Completed" ? (d.exists ? "good" : "warn") : d.status === "Failed" ? "bad" : d.status === "Paused" ? "warn" : "run";
 
+/** Options > General > Interface size, and Regional, applied to every window. */
+export function applyLook(s: { interfaceSize?: number; dateOrder?: string; clock?: string }) {
+  (document.documentElement.style as unknown as Record<string, string>).zoom = String((s.interfaceSize || 100) / 100);
+  regional.dateOrder = s.dateOrder || "auto";
+  regional.clock = s.clock || "auto";
+}
 export function applyTheme(theme: string) {
   document.documentElement.dataset.theme = theme === "light" ? "light" : "dark";
 }

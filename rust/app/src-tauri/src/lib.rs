@@ -143,7 +143,8 @@ pub fn offer(app: &AppHandle, request: PendingRequest, force_dialog: bool) -> Re
     }
     let show_dialog = force_dialog || manager.settings.read().unwrap().show_start_dialog;
     if !show_dialog {
-        let id = manager.add(AddRequest { url: request.url, file_name: request.file_name, description: request.description, session: request.session, request_id: request.request_id, video: request.video, start: Some("now".into()), ..Default::default() })?;
+        let start = if manager.settings.read().unwrap().only_add_to_queue { "queue" } else { "now" };
+        let id = manager.add(AddRequest { url: request.url, file_name: request.file_name, description: request.description, session: request.session, request_id: request.request_id, video: request.video, start: Some(start.into()), ..Default::default() })?;
         if manager.settings.read().unwrap().show_progress_window {
             open_progress(app, &id);
         }
@@ -546,7 +547,7 @@ async fn show_progress(app: AppHandle, id: String) -> Result<(), String> {
 #[tauri::command]
 async fn show_window(app: AppHandle, name: String) -> Result<(), String> {
     match name.as_str() {
-        "options" => open_window(&app, "options", "Options", 640.0, 520.0, true),
+        "options" => open_window(&app, "options", "Options", 720.0, 600.0, true),
         "scheduler" => open_window(&app, "scheduler", "Scheduler", 680.0, 500.0, true),
         "batch" => open_window(&app, "batch", "Add batch download", 560.0, 420.0, true),
         "grabber" => open_window(&app, "grabber", "Site grabber", 640.0, 540.0, true),
@@ -586,6 +587,44 @@ async fn register_browsers() -> Result<String, String> {
     let output = command.output().map_err(|e| e.to_string())?;
     let text = String::from_utf8_lossy(if output.status.success() { &output.stdout } else { &output.stderr }).trim().to_string();
     if output.status.success() { Ok(text) } else { Err(text) }
+}
+/// Options > General > Test browser integration: is each browser connected to this Kestrel?
+#[derive(Serialize)]
+struct BrowserCheck {
+    browser: String,
+    ok: bool,
+    detail: String,
+}
+#[tauri::command]
+fn test_browsers() -> Vec<BrowserCheck> {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        let host = std::env::current_exe().map(|e| e.with_file_name("flux-nmhost.exe")).unwrap_or_default();
+        [("Google Chrome", r"Google\Chrome"), ("Microsoft Edge", r"Microsoft\Edge"), ("Brave", r"BraveSoftware\Brave-Browser"), ("Mozilla Firefox", "Mozilla")]
+            .into_iter()
+            .map(|(name, key)| {
+                let key = format!(r"HKCU\Software\{key}\NativeMessagingHosts\com.swiftfetch.bridge");
+                let manifest = std::process::Command::new("reg").args(["query", &key, "/ve"]).creation_flags(0x0800_0000).output().ok()
+                    .and_then(|o| String::from_utf8_lossy(&o.stdout).lines().find(|l| l.contains("REG_SZ")).and_then(|l| l.split("REG_SZ").nth(1)).map(|v| std::path::PathBuf::from(v.trim())));
+                let (ok, detail) = match manifest {
+                    None => (false, "Not connected: use Connect browsers.".to_string()),
+                    Some(m) if !m.is_file() => (false, "Connected to a copy that is gone: use Connect browsers.".to_string()),
+                    Some(m) => {
+                        let path = std::fs::read_to_string(&m).ok().and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok()).and_then(|v| v["path"].as_str().map(std::path::PathBuf::from));
+                        match path {
+                            Some(p) if p == host => (true, "Connected to this Kestrel.".to_string()),
+                            Some(p) if p.is_file() => (true, format!("Connected to another copy: {}", p.display())),
+                            _ => (false, "Its bridge program is missing: use Connect browsers.".to_string()),
+                        }
+                    }
+                };
+                BrowserCheck { browser: name.into(), ok, detail }
+            })
+            .collect()
+    }
+    #[cfg(not(windows))]
+    Vec::new()
 }
 /// Site grabber: links to files of the given types on one site.
 #[tauri::command]
@@ -682,6 +721,7 @@ fn scheduler(app: AppHandle) {
                 }
                 if queue.start_time.as_deref() == Some(now.as_str()) && fired.insert(format!("{stamp}-start-{}", queue.name)) {
                     manager.start_queue(&queue.name);
+                    if let Some(sound) = manager.settings.read().unwrap().sounds.get(2).filter(|s| s.on) { system::play(&sound.file, true); }
                     let _ = app.emit("message", format!("{} started on schedule.", queue.name));
                 }
                 if queue.stop_time.as_deref() == Some(now.as_str()) && fired.insert(format!("{stamp}-stop-{}", queue.name)) {
@@ -797,7 +837,7 @@ pub fn run() {
                 let manager = completer.state::<Shared>();
                 let settings = manager.settings.read().unwrap().clone();
                 if let Some(window) = completer.get_webview_window(&format!("progress-{id}")) { let _ = window.close(); }
-                if settings.play_sounds { system::sound(true); }
+                if let Some(sound) = settings.sounds.first().filter(|s| s.on) { system::play(&sound.file, true); }
                 if settings.show_complete_dialog { open_complete(&completer, &id); }
                 // "Turn off computer / exit when done" chosen in its progress window: the main
                 // window counts down and can still cancel it.
@@ -810,6 +850,7 @@ pub fn run() {
             });
             let failures = handle.clone();
             handle.listen("failed", move |event| {
+                if let Some(sound) = failures.state::<Shared>().settings.read().unwrap().sounds.get(1).filter(|s| s.on) { system::play(&sound.file, false); }
                 if let Ok((id, error)) = serde_json::from_str::<(String, String)>(event.payload()) {
                     desktop::failed(&failures, &id, &error);
                 }
@@ -842,7 +883,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             list_downloads, get_download, get_settings, save_settings, offer_url, get_pending, confirm_pending, cancel_pending,
-            probe_video, video_exact_cut, confirm_video, video_as_file, load_torrent, confirm_torrent, open_torrent_file, check_updates, install_update, drag_item, grab_site, run_waiting, register_browsers, set_after_complete, get_after_complete, open_with, to_background, crash_reports, dismiss_crash, report_crash,
+            probe_video, video_exact_cut, confirm_video, video_as_file, load_torrent, confirm_torrent, open_torrent_file, check_updates, install_update, drag_item, grab_site, run_waiting, register_browsers, test_browsers, set_after_complete, get_after_complete, open_with, to_background, crash_reports, dismiss_crash, report_crash,
             add_downloads, pause_downloads, resume_downloads, pause_all, resume_all, remove_downloads, remove_completed,
             rename_download, redownload, set_speed_limit, set_queue, enqueue, start_queue, stop_queue, running_queues,
             open_file, show_in_folder, open_folder, show_progress, show_window, power_action, exit_app, app_version
