@@ -2,13 +2,17 @@
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import { open as pickFolder } from "@tauri-apps/plugin-dialog";
   import { onMount } from "svelte";
-  import { call, applyTheme, type Settings } from "../lib/api";
+  import { call, applyTheme, categories, type Settings } from "../lib/api";
 
   let s: Settings | null = $state(null);
   let tab = $state("General");
   let error = $state("");
   let limitKb = $state(0);
-  const tabs = ["General", "Save to", "Downloads", "Connection", "Browser", "Updates"];
+  const tabs = ["General", "Save to", "Downloads", "Connection", "Site logins", "Rules", "Browser", "Updates"];
+  async function pickScanner() {
+    const chosen = await pickFolder({ title: "Virus scanner program", filters: [{ name: "Programs", extensions: ["exe", "bat", "cmd"] }] });
+    if (typeof chosen === "string" && s) s.virusScanner = chosen;
+  }
   const win = getCurrentWindow();
 
   onMount(() => { call<Settings>("get_settings").then((v) => { s = v; limitKb = Math.round(v.speedLimit / 1024); applyTheme(v.theme); }); });
@@ -60,6 +64,16 @@
           <div class="form">
             <label for="retries">Retries</label><input id="retries" class="input short" type="number" min="0" max="20" bind:value={s.maxRetries} />
           </div>
+          <fieldset class="group">
+            <legend>Virus scan</legend>
+            <div class="form">
+              <label for="scanner">Scanner</label>
+              <div class="row"><input id="scanner" class="input" bind:value={s.virusScanner} placeholder="None" spellcheck="false" /><button class="btn" onclick={pickScanner}>Browse…</button></div>
+              <label for="scanargs">Arguments</label>
+              <input id="scanargs" class="input" bind:value={s.virusScannerArgs} spellcheck="false" disabled={!s.virusScanner.trim()} />
+            </div>
+            <p class="note">Runs on every finished file; {"{file}"} is replaced by its path. If the scanner reports a problem, the file is renamed to ….blocked. Windows Defender: <code>C:\Program Files\Windows Defender\MpCmdRun.exe</code> with <code>-Scan -ScanType 3 -File "{"{file}"}" -DisableRemediation</code></p>
+          </fieldset>
         {:else if tab === "Connection"}
           <h2>Connection</h2>
           <div class="form">
@@ -80,6 +94,15 @@
             </div>
             <p class="note">Used for files, videos and torrent trackers. Saved encrypted for your Windows account.</p>
           </fieldset>
+          <fieldset class="group">
+            <legend>VPN</legend>
+            <div class="form">
+              <label for="vpn">Windows VPN</label>
+              <input id="vpn" class="input" bind:value={s.vpnProfile} placeholder="Name of a VPN in Windows Settings > Network > VPN" spellcheck="false" />
+            </div>
+            <label class="check"><input type="checkbox" bind:checked={s.connectVpn} disabled={!s.vpnProfile.trim()} /> Connect it before downloads start</label>
+            <label class="check"><input type="checkbox" bind:checked={s.disconnectVpnWhenIdle} disabled={!s.vpnProfile.trim()} /> Disconnect it when nothing is downloading</label>
+          </fieldset>
           <div class="form">
             <label for="ua">Browser identity</label>
             <input id="ua" class="input" bind:value={s.userAgent} placeholder="Flux's built-in identity (a current Chrome)" spellcheck="false" />
@@ -91,6 +114,52 @@
               <div class="row"><span class="host">{host}</span><span class="muted">{n} connection{n === 1 ? "" : "s"}</span><button class="btn small" onclick={() => { delete s!.hostLimits[host]; s!.hostLimits = { ...s!.hostLimits }; }}>Forget</button></div>
             {/each}
           </fieldset>
+        {:else if tab === "Site logins"}
+          <h2>Site logins</h2>
+          <p class="note">Flux signs in with these when a download from the site asks for a password (unless the browser already sent one). Saved encrypted for your Windows account.</p>
+          {#each s.siteLogins as login, i}
+            <fieldset class="group">
+              <div class="row">
+                <label class="check"><input type="checkbox" bind:checked={login.enabled} /> Use</label>
+                <div class="left"></div>
+                <button class="btn small" onclick={() => { s!.siteLogins = s!.siteLogins.filter((_, j) => j !== i); }}>Remove</button>
+              </div>
+              <div class="form">
+                <label for="lo{i}">Site</label><input id="lo{i}" class="input" bind:value={login.origin} placeholder="https://files.example.com/" spellcheck="false" />
+                <label for="lu{i}">User name</label><input id="lu{i}" class="input" bind:value={login.username} autocomplete="off" spellcheck="false" />
+                <label for="lp{i}">Password</label><input id="lp{i}" class="input" type="password" bind:value={login.password} autocomplete="off" />
+              </div>
+            </fieldset>
+          {/each}
+          <div><button class="btn" onclick={() => { s!.siteLogins = [...s!.siteLogins, { enabled: true, origin: "https://", username: "", password: "" }]; }}>Add a login</button></div>
+        {:else if tab === "Rules"}
+          <h2>Rules</h2>
+          <p class="note">The first rule that matches a new download decides where it goes and how. Empty conditions match everything.</p>
+          {#each s.rules as rule, i}
+            <fieldset class="group">
+              <div class="row">
+                <label class="check"><input type="checkbox" bind:checked={rule.enabled} /></label>
+                <input class="input" bind:value={rule.name} aria-label="Rule name" />
+                <button class="btn small" disabled={i === 0} onclick={() => { const r = [...s!.rules]; [r[i - 1], r[i]] = [r[i], r[i - 1]]; s!.rules = r; }} title="Check this rule earlier">↑</button>
+                <button class="btn small" onclick={() => { s!.rules = s!.rules.filter((_, j) => j !== i); }}>Remove</button>
+              </div>
+              <div class="form">
+                <label for="rd{i}">If the site has</label><input id="rd{i}" class="input" bind:value={rule.domain} placeholder="example.com" spellcheck="false" />
+                <label for="re{i}">and the type is</label><input id="re{i}" class="input" bind:value={rule.extensions} placeholder="iso, mkv, zip" spellcheck="false" />
+                <label for="rp{i}">and the address matches</label><input id="rp{i}" class="input" bind:value={rule.urlPattern} placeholder="a regular expression (optional)" spellcheck="false" />
+                <label for="rf{i}">save in</label><input id="rf{i}" class="input" bind:value={rule.folder} placeholder="the category's folder" spellcheck="false" />
+                <label for="rc{i}">as category</label>
+                <select id="rc{i}" class="input" bind:value={rule.category}><option value="">(by file type)</option>{#each categories as c}<option value={c}>{c}</option>{/each}</select>
+                <label for="rq{i}">in queue</label>
+                <select id="rq{i}" class="input" bind:value={rule.queue}><option value="">Main download queue</option>{#each s.queues as q}<option value={q.name}>{q.name}</option>{/each}</select>
+                <label for="rn{i}">connections</label>
+                <select id="rn{i}" class="input short" bind:value={rule.connections}><option value={null}>default</option>{#each [1, 2, 4, 8, 16, 32] as n}<option value={n}>{n}</option>{/each}</select>
+                <label for="rl{i}">speed limit</label>
+                <div class="row"><input id="rl{i}" class="input short" type="number" min="0" value={rule.speedLimit ? Math.round(rule.speedLimit / 1024) : ""} placeholder="none" oninput={(e) => { const kb = Number((e.currentTarget as HTMLInputElement).value); rule.speedLimit = kb > 0 ? kb * 1024 : null; }} /> <span class="muted">KB/s</span></div>
+              </div>
+            </fieldset>
+          {/each}
+          <div><button class="btn" onclick={() => { s!.rules = [...s!.rules, { name: "New rule", enabled: true, domain: "", extensions: "", urlPattern: "", folder: "", category: "", queue: "", connections: null, speedLimit: null }]; }}>Add a rule</button></div>
         {:else if tab === "Browser"}
           <h2>Browser</h2>
           <label class="check"><input type="checkbox" bind:checked={s.captureEnabled} /> Take downloads from the browser</label>

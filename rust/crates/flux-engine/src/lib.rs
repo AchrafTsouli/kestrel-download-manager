@@ -12,6 +12,7 @@
 
 pub mod error;
 pub mod file;
+mod grabber;
 pub mod limits;
 pub mod plan;
 pub mod session;

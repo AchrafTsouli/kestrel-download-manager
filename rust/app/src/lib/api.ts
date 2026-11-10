@@ -16,6 +16,13 @@ export type Settings = {
   playSounds: boolean; maxRetries: number; proxy: string; proxyUsername: string; proxyPassword: string; userAgent: string; queues: Queue[]; hostLimits: Record<string, number>;
   updateFeed: string; autoCheckUpdates: boolean; autoUpdateTools: boolean; lastUpdateCheckMs: number; captureExtensions: string;
   captureEnabled: boolean; videoPanel: boolean; excludedSites: string; columns: string[];
+  siteLogins: SiteLogin[]; rules: Rule[]; virusScanner: string; virusScannerArgs: string;
+  vpnProfile: string; connectVpn: boolean; disconnectVpnWhenIdle: boolean;
+};
+export type SiteLogin = { enabled: boolean; origin: string; username: string; password: string };
+export type Rule = {
+  name: string; enabled: boolean; domain: string; extensions: string; urlPattern: string;
+  folder: string; category: string; queue: string; connections: number | null; speedLimit: number | null;
 };
 export type Probe = { url: string; fileName: string; total: number | null; resumable: boolean; contentType: string | null; category: string; folder: string; error: string | null };
 

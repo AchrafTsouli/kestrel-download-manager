@@ -75,6 +75,28 @@ pub fn settings(v1: &Value) -> Settings {
     s.capture_enabled = flag(v1, "BrowserCaptureEnabled", s.capture_enabled);
     s.video_panel = flag(v1, "BrowserMediaPanelEnabled", s.video_panel);
     if let Some(sites) = text(v1, "ExcludedSites") { s.excluded_sites = sites; }
+    if let Some(scanner) = text(v1, "VirusScanner") { s.virus_scanner = scanner; }
+    if let Some(args) = text(v1, "VirusScannerArguments") { s.virus_scanner_args = args; }
+    if let Some(profile) = text(v1, "VpnProfile") { s.vpn_profile = profile; }
+    s.connect_vpn = flag(v1, "ConnectVpnBeforeDownload", false);
+    s.disconnect_vpn_when_idle = flag(v1, "DisconnectVpnWhenIdle", false);
+    if let Some(logins) = v1.get("SiteLogins").and_then(Value::as_array) {
+        s.site_logins = logins.iter().filter_map(|l| serde_json::from_value(camel(l)).ok()).collect();
+    }
+    if let Some(rules) = v1.get("Rules").and_then(Value::as_array) {
+        s.rules = rules.iter().map(|r| crate::model::Rule {
+            name: text(r, "Name").unwrap_or_else(|| "Rule".into()),
+            enabled: flag(r, "Enabled", true),
+            domain: text(r, "DomainPattern").unwrap_or_default(),
+            extensions: text(r, "ExtensionPattern").unwrap_or_default(),
+            url_pattern: text(r, "UrlRegex").unwrap_or_default(),
+            folder: text(r, "TargetFolder").unwrap_or_default(),
+            category: text(r, "Category").unwrap_or_default(),
+            queue: text(r, "Queue").map(|q| queue_name(&q)).unwrap_or_default(),
+            connections: number(r, "Connections").map(|n| n as usize),
+            speed_limit: number(r, "SpeedLimitBytes"),
+        }).collect();
+    }
     if let Some(queues) = v1.get("Queues").and_then(Value::as_array) {
         // Synchronization queues (checking files for changes) have no 2.0 counterpart yet.
         let mut list: Vec<Queue> = queues

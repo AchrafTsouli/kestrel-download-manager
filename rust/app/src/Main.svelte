@@ -206,7 +206,8 @@
       { label: "Delete all completed", run: deleteCompleted },
       { label: "Start main queue", sep: true, run: () => toggleQueue("Main download queue"), disabled: () => runningQueues.includes("Main download queue") },
       { label: "Stop main queue", run: () => toggleQueue("Main download queue"), disabled: () => !runningQueues.includes("Main download queue") },
-      { label: "Scheduler", sep: true, run: () => showWindow("scheduler") },
+      { label: "Site grabber…", sep: true, run: () => showWindow("grabber") },
+      { label: "Scheduler", run: () => showWindow("scheduler") },
       { label: "Options", run: () => showWindow("options") },
     ],
     View: [

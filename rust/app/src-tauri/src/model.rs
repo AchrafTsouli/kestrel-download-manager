@@ -251,6 +251,91 @@ pub struct Settings {
     pub video_panel: bool,
     pub excluded_sites: String,
     pub columns: Vec<String>,
+    /// User name and password sent to these sites (HTTP Basic), unless the browser sent its own.
+    pub site_logins: Vec<SiteLogin>,
+    /// Where and how matching downloads are saved.
+    pub rules: Vec<Rule>,
+    /// A program run on each finished file; a non-zero exit code blocks the file.
+    pub virus_scanner: String,
+    /// Its arguments; `{file}` is replaced by the file's path.
+    pub virus_scanner_args: String,
+    /// A Windows VPN connection (Settings > VPN) dialled before downloads start.
+    pub vpn_profile: String,
+    pub connect_vpn: bool,
+    pub disconnect_vpn_when_idle: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct SiteLogin {
+    pub enabled: bool,
+    /// `https://example.com/`
+    pub origin: String,
+    pub username: String,
+    pub password: String,
+}
+
+impl Default for SiteLogin {
+    fn default() -> Self {
+        SiteLogin { enabled: true, origin: String::new(), username: String::new(), password: String::new() }
+    }
+}
+
+impl SiteLogin {
+    pub fn matches(&self, url: &url::Url) -> bool {
+        self.enabled && !(self.username.is_empty() && self.password.is_empty()) && url::Url::parse(self.origin.trim()).is_ok_and(|o| o.origin() == url.origin())
+    }
+}
+
+/// "Downloads from this site / of these types / matching this pattern go here, like this."
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct Rule {
+    pub name: String,
+    pub enabled: bool,
+    /// Part of the site's name ("example.com" also matches "files.example.com").
+    pub domain: String,
+    /// "iso, mkv, zip"
+    pub extensions: String,
+    /// A regular expression on the whole address.
+    pub url_pattern: String,
+    pub folder: String,
+    pub category: String,
+    pub queue: String,
+    pub connections: Option<usize>,
+    /// Bytes per second; none = no limit of its own.
+    pub speed_limit: Option<u64>,
+}
+
+impl Default for Rule {
+    fn default() -> Self {
+        Rule { name: "New rule".into(), enabled: true, domain: String::new(), extensions: String::new(), url_pattern: String::new(), folder: String::new(), category: String::new(), queue: String::new(), connections: None, speed_limit: None }
+    }
+}
+
+impl Rule {
+    pub fn matches(&self, url: &url::Url, file_name: &str) -> bool {
+        if !self.enabled {
+            return false;
+        }
+        let domain = self.domain.trim().to_ascii_lowercase();
+        if !domain.is_empty() && !url.host_str().unwrap_or_default().to_ascii_lowercase().contains(&domain) {
+            return false;
+        }
+        let ext = Path::new(file_name).extension().map(|e| e.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
+        let wanted: Vec<String> = self.extensions.split([',', ' ', ';']).map(|e| e.trim().trim_start_matches('.').to_ascii_lowercase()).filter(|e| !e.is_empty()).collect();
+        if !wanted.is_empty() && !wanted.contains(&ext) {
+            return false;
+        }
+        let pattern = self.url_pattern.trim();
+        if !pattern.is_empty() {
+            let regex = regex::RegexBuilder::new(pattern).case_insensitive(true).size_limit(1 << 20).build();
+            if !regex.is_ok_and(|r| r.is_match(url.as_str())) {
+                return false;
+            }
+        }
+        true
+    }
 }
 
 pub const DEFAULT_EXTENSIONS: &str = "3gp 7z aac ace aif apk arj asf avi bin bz2 deb dmg doc docx epub exe flac flv gz gzip img iso jar lzh m4a m4v mkv mov mp3 mp4 mpeg mpg msi msix ogg ogv opus pdf pkg ppt pptx qt r0* r1* ra rar rm rmvb rpm sit sitx tar tgz torrent ts vob wav webm wma wmv xls xlsx xz z zip zst";
@@ -287,6 +372,13 @@ impl Default for Settings {
             video_panel: true,
             excluded_sites: String::new(),
             columns: vec![],
+            site_logins: vec![],
+            rules: vec![],
+            virus_scanner: String::new(),
+            virus_scanner_args: "{file}".into(),
+            vpn_profile: String::new(),
+            connect_vpn: false,
+            disconnect_vpn_when_idle: false,
         }
     }
 }
@@ -306,5 +398,41 @@ pub fn category_for(name: &str) -> &'static str {
         "mp4" | "mkv" | "webm" | "avi" | "mov" | "wmv" | "flv" | "m4v" | "ts" | "3gp" | "mpg" | "mpeg" => "Video",
         "jpg" | "jpeg" | "png" | "gif" | "webp" | "bmp" | "svg" | "tif" | "tiff" | "heic" | "ico" => "Images",
         _ => "Other",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn url(text: &str) -> url::Url {
+        url::Url::parse(text).unwrap()
+    }
+
+    #[test]
+    fn rules_match_on_site_type_and_pattern() {
+        let rule = Rule { domain: "Example.com".into(), extensions: ".iso, mkv".into(), ..Default::default() };
+        assert!(rule.matches(&url("https://files.example.com/a/b.iso"), "b.iso"));
+        assert!(!rule.matches(&url("https://files.example.com/a/b.zip"), "b.zip"));
+        assert!(!rule.matches(&url("https://other.test/b.iso"), "b.iso"));
+        let pattern = Rule { url_pattern: r"/nightly/\d+/".into(), ..Default::default() };
+        assert!(pattern.matches(&url("https://a.test/NIGHTLY/42/x.bin"), "x.bin"));
+        assert!(!Rule { url_pattern: "(".into(), ..Default::default() }.matches(&url("https://a.test/"), "x"), "a broken pattern matches nothing");
+        assert!(!Rule { enabled: false, ..Default::default() }.matches(&url("https://a.test/"), "x"));
+    }
+
+    #[test]
+    fn logins_belong_to_one_site() {
+        let login = SiteLogin { origin: "https://files.test/".into(), username: "me".into(), password: "pw".into(), ..Default::default() };
+        assert!(login.matches(&url("https://files.test/a.zip")));
+        assert!(!login.matches(&url("http://files.test/a.zip")), "another scheme is another site");
+        assert!(!login.matches(&url("https://evil.test/?files.test")));
+        assert!(!SiteLogin { origin: "https://files.test/".into(), ..Default::default() }.matches(&url("https://files.test/")), "no credentials, nothing to send");
+    }
+
+    #[test]
+    fn scanner_arguments_keep_quoted_parts() {
+        assert_eq!(crate::manager::split_arguments(r#"--scan "{file}" /quiet"#).unwrap(), ["--scan", "{file}", "/quiet"]);
+        assert!(crate::manager::split_arguments(r#""unclosed"#).is_err());
     }
 }

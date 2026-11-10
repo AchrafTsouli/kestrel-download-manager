@@ -72,6 +72,8 @@ pub struct Manager {
     live: Mutex<HashMap<String, Live>>,
     /// Queues whose schedule started them (a stopped queue keeps its downloads waiting).
     pub running_queues: Mutex<std::collections::HashSet<String>>,
+    /// Flux dialled the VPN and it is still up.
+    vpn_up: tokio::sync::Mutex<bool>,
 }
 
 pub type Shared = Arc<Manager>;
@@ -113,6 +115,7 @@ impl Manager {
             records: Mutex::new(records),
             live: Mutex::new(HashMap::new()),
             running_queues: Mutex::new(std::collections::HashSet::new()),
+            vpn_up: tokio::sync::Mutex::new(false),
         });
         let current = manager.settings.read().unwrap().clone();
         if let Err(error) = manager.apply_network(&current) {
@@ -253,6 +256,16 @@ impl Manager {
         probe.file_name = name.clone();
         probe.category = category_for(&name).into();
         probe.folder = self.folder_for(&probe.category).to_string_lossy().into_owned();
+        // The start dialog shows where a rule will put it.
+        if let Some(rule) = Url::parse(url.trim()).ok().and_then(|u| self.rule_for(&u, &name)) {
+            if !rule.category.trim().is_empty() {
+                probe.category = rule.category.trim().to_string();
+                probe.folder = self.folder_for(&probe.category).to_string_lossy().into_owned();
+            }
+            if Path::new(rule.folder.trim()).is_absolute() {
+                probe.folder = rule.folder.trim().to_string();
+            }
+        }
         probe
     }
 
@@ -276,23 +289,28 @@ impl Manager {
         if let Some(session) = &request.session {
             session.validate(&url).map_err(|e| e.message)?;
         }
+        let session = self.with_login(&url, request.session.clone());
         let mut name = request.file_name.as_deref().filter(|n| !n.trim().is_empty()).map(flux_engine::sanitize_file_name).unwrap_or_else(|| Manager::name_from_url(&url));
         if let Some(selection) = &request.video {
             // The file is named after the format that will be written.
             let stem = Path::new(&name).file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "Video".into());
             name = format!("{stem}.{}", selection.extension);
         }
-        let category = request.category.clone().unwrap_or_else(|| match &request.video {
+        let rule = self.rule_for(&url, &name);
+        let rule_text = |pick: fn(&crate::model::Rule) -> &String| rule.as_ref().map(|r| pick(r).trim().to_string()).filter(|t| !t.is_empty());
+        let category = request.category.clone().or_else(|| rule_text(|r| &r.category)).unwrap_or_else(|| match &request.video {
             Some(selection) if selection.audio_only => "Music".to_string(),
             Some(_) => "Video".to_string(),
             None => category_for(&name).to_string(),
         });
-        let folder = request.folder.as_ref().map(PathBuf::from).filter(|p| p.is_absolute()).unwrap_or_else(|| self.folder_for(&category));
+        let folder = request.folder.as_ref().map(PathBuf::from).filter(|p| p.is_absolute())
+            .or_else(|| rule_text(|r| &r.folder).map(PathBuf::from).filter(|p| p.is_absolute()))
+            .unwrap_or_else(|| self.folder_for(&category));
         std::fs::create_dir_all(&folder).map_err(|e| format!("The folder could not be created: {e}"))?;
         let destination = self.unique(&folder, &name);
         let settings = self.settings.read().unwrap().clone();
         let start = request.start.clone().unwrap_or_else(|| "now".into());
-        let queue = request.queue.clone().filter(|q| settings.queues.iter().any(|x| &x.name == q)).unwrap_or_else(|| MAIN_QUEUE.into());
+        let queue = request.queue.clone().or_else(|| rule_text(|r| &r.queue)).filter(|q| settings.queues.iter().any(|x| &x.name == q)).unwrap_or_else(|| MAIN_QUEUE.into());
         let id = format!("{:016x}{:04x}", SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos() as u64, rand_u16());
         let record = Record {
             id: id.clone(),
@@ -309,9 +327,9 @@ impl Manager {
             total: request.total.or(request.video.as_ref().and_then(|v| v.total_bytes)),
             written: 0,
             error: None,
-            connections: settings.connections,
-            speed_limit: 0,
-            session: request.session.clone(),
+            connections: rule.as_ref().and_then(|r| r.connections).map_or(settings.connections, |n| n.clamp(1, 32)),
+            speed_limit: rule.as_ref().and_then(|r| r.speed_limit).unwrap_or(0),
+            session,
             resume: Default::default(),
             expected_sha256: request.expected_sha256.clone().filter(|s| s.len() == 64 && s.chars().all(|c| c.is_ascii_hexdigit())),
             sha256: None,
@@ -431,7 +449,17 @@ impl Manager {
                 let id = id.clone();
                 move |event: Event| manager.on_event(&id, event)
             };
-            let result = manager.engine.download(&mut job, events, cancel).await;
+            let result = match manager.ensure_vpn().await {
+                Err(error) => Err(flux_engine::Error::protocol(error)),
+                Ok(()) => manager.engine.download(&mut job, events, cancel).await,
+            };
+            let result = match result {
+                Ok(Outcome::Completed { path, bytes, sha256 }) => match manager.scan(&path).await {
+                    Ok(()) => Ok(Outcome::Completed { path, bytes, sha256 }),
+                    Err(error) => Err(flux_engine::Error::protocol(error)),
+                },
+                other => other,
+            };
             manager.finish(&id, job, result);
         });
     }
@@ -506,6 +534,7 @@ impl Manager {
     fn finished(self: &Arc<Self>, id: &str, completed: bool, error: Option<String>) {
         self.save(id);
         self.emit(id);
+        self.disconnect_vpn_if_idle();
         if completed {
             let _ = self.app.emit("completed", id.to_string());
         } else if let Some(error) = error {
@@ -513,6 +542,90 @@ impl Manager {
         }
         self.schedule();
         self.check_queues_done();
+    }
+
+    // ------------------------------------------------------------------ logins, rules, scanner, VPN
+
+    /// The first enabled rule that matches the address and file name.
+    pub fn rule_for(&self, url: &Url, file_name: &str) -> Option<crate::model::Rule> {
+        self.settings.read().unwrap().rules.iter().find(|r| r.matches(url, file_name)).cloned()
+    }
+
+    /// Adds a saved site login to the request, unless the browser sent credentials of its own.
+    pub fn with_login(&self, url: &Url, session: Option<Session>) -> Option<Session> {
+        use base64::Engine as _;
+        if session.as_ref().is_some_and(|s| s.authorization.is_some()) {
+            return session;
+        }
+        let settings = self.settings.read().unwrap();
+        let Some(login) = settings.site_logins.iter().find(|l| l.matches(url)) else { return session };
+        let mut session = session.unwrap_or_else(|| Session::for_url(url));
+        let token = base64::engine::general_purpose::STANDARD.encode(format!("{}:{}", login.username, login.password));
+        session.authorization = Some(format!("Basic {token}"));
+        Some(session)
+    }
+
+    /// Runs the chosen virus scanner on a finished file (or torrent folder). A non-zero exit code
+    /// blocks it: the file is renamed with ".blocked" so it is not opened by accident.
+    async fn scan(&self, path: &Path) -> Result<(), String> {
+        let (scanner, args) = {
+            let s = self.settings.read().unwrap();
+            (s.virus_scanner.trim().to_string(), s.virus_scanner_args.clone())
+        };
+        if scanner.is_empty() {
+            return Ok(());
+        }
+        let file = path.to_string_lossy().into_owned();
+        let arguments: Vec<String> = split_arguments(&args)?.into_iter().map(|a| a.replace("{file}", &file)).collect();
+        let mut command = tokio::process::Command::new(&scanner);
+        command.args(&arguments).kill_on_drop(true);
+        #[cfg(windows)]
+        command.creation_flags(0x0800_0000);
+        let status = tokio::time::timeout(Duration::from_secs(30 * 60), command.status()).await
+            .map_err(|_| "The virus scanner did not finish within 30 minutes.".to_string())?
+            .map_err(|e| format!("The virus scanner could not start: {e}"))?;
+        if status.success() {
+            return Ok(());
+        }
+        let mut blocked = path.as_os_str().to_owned();
+        blocked.push(".blocked");
+        let _ = std::fs::rename(path, &blocked);
+        Err(format!("The virus scanner reported a problem (exit code {}). The file was kept as {}.", status.code().unwrap_or(-1), Path::new(&blocked).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()))
+    }
+
+    /// Dials the chosen Windows VPN before a download starts (once; it stays up).
+    async fn ensure_vpn(&self) -> Result<(), String> {
+        let (enabled, profile) = {
+            let s = self.settings.read().unwrap();
+            (s.connect_vpn, s.vpn_profile.trim().to_string())
+        };
+        if !enabled || profile.is_empty() {
+            return Ok(());
+        }
+        let mut up = self.vpn_up.lock().await;
+        if *up {
+            return Ok(());
+        }
+        rasdial(&profile, false).await?;
+        *up = true;
+        Ok(())
+    }
+
+    fn disconnect_vpn_if_idle(self: &Arc<Self>) {
+        let (wanted, profile) = {
+            let s = self.settings.read().unwrap();
+            (s.disconnect_vpn_when_idle, s.vpn_profile.trim().to_string())
+        };
+        if !wanted || profile.is_empty() || !self.live.lock().unwrap().is_empty() {
+            return;
+        }
+        let manager = self.clone();
+        tauri::async_runtime::spawn(async move {
+            let mut up = manager.vpn_up.lock().await;
+            if *up && manager.live.lock().unwrap().is_empty() && rasdial(&profile, true).await.is_ok() {
+                *up = false;
+            }
+        });
     }
 
     // ------------------------------------------------------------------ torrents
@@ -538,7 +651,14 @@ impl Manager {
                 let selection = selection.clone();
                 move |status: flux_torrent::Status| manager.on_torrent_status(&id, &selection, status)
             };
-            let result = manager.torrents.download(&selection, &folder, limit, events, cancel).await;
+            let result = match manager.ensure_vpn().await {
+                Err(error) => Err(error),
+                Ok(()) => manager.torrents.download(&selection, &folder, limit, events, cancel).await,
+            };
+            let result = match result {
+                Ok(flux_torrent::Outcome::Completed) => manager.scan(&folder.join(&selection.name)).await.map(|_| flux_torrent::Outcome::Completed),
+                other => other,
+            };
             manager.live.lock().unwrap().remove(&id);
             let completed = matches!(result, Ok(flux_torrent::Outcome::Completed));
             let error = result.as_ref().err().cloned();
@@ -617,7 +737,14 @@ impl Manager {
                 let id = id.clone();
                 move |event: flux_media::MediaEvent| manager.on_video_event(&id, event)
             };
-            let result = manager.media.download(&mut job, events, cancel).await;
+            let result = match manager.ensure_vpn().await {
+                Err(error) => Err(error),
+                Ok(()) => manager.media.download(&mut job, events, cancel).await,
+            };
+            let result = match result {
+                Ok(flux_media::Outcome::Completed { path, bytes, sha256 }) => manager.scan(&path).await.map(|_| flux_media::Outcome::Completed { path, bytes, sha256 }),
+                other => other,
+            };
             manager.live.lock().unwrap().remove(&id);
             let mut completed = false;
             let error = result.as_ref().err().cloned();
@@ -742,6 +869,11 @@ impl Manager {
         let ids: Vec<String> = self.records.lock().unwrap().iter().filter(|r| r.queue == name && r.status.resumable()).map(|r| r.id.clone()).collect();
         self.enqueue(&ids);
     }
+    /// Lets a queue run what is waiting in it, without restarting its paused downloads.
+    pub fn run_waiting(self: &Arc<Self>, name: &str) {
+        self.running_queues.lock().unwrap().insert(name.to_string());
+        self.schedule();
+    }
     pub fn stop_queue(self: &Arc<Self>, name: &str) {
         self.running_queues.lock().unwrap().remove(name);
         let ids: Vec<String> = self.records.lock().unwrap().iter().filter(|r| r.queue == name && (r.status.running() || r.status == Status::Queued)).map(|r| r.id.clone()).collect();
@@ -847,6 +979,44 @@ fn video_tools_directory() -> PathBuf {
     }
     let complete = |dir: &PathBuf| ["yt-dlp.exe", "ffmpeg.exe", "ffprobe.exe"].iter().all(|n| dir.join(n).exists());
     candidates.iter().find(|d| complete(d)).cloned().unwrap_or_else(|| candidates[0].clone())
+}
+
+/// Windows' own VPN dialler, with the profile's saved credentials.
+async fn rasdial(profile: &str, disconnect: bool) -> Result<(), String> {
+    let mut command = tokio::process::Command::new("rasdial.exe");
+    command.arg(profile).kill_on_drop(true);
+    if disconnect {
+        command.arg("/disconnect");
+    }
+    #[cfg(windows)]
+    command.creation_flags(0x0800_0000);
+    let status = tokio::time::timeout(Duration::from_secs(90), command.status()).await
+        .map_err(|_| "The VPN did not connect within 90 seconds.".to_string())?
+        .map_err(|e| format!("Windows VPN could not start: {e}"))?;
+    if status.success() { Ok(()) } else { Err(format!("Windows VPN returned error {}. Check the profile \"{profile}\" and its saved sign-in.", status.code().unwrap_or(-1))) }
+}
+
+/// Splits a command line into arguments ("quoted parts" stay whole).
+pub fn split_arguments(text: &str) -> Result<Vec<String>, String> {
+    let (mut out, mut token, mut quoted) = (Vec::new(), String::new(), false);
+    for c in text.chars() {
+        match c {
+            '"' => quoted = !quoted,
+            c if c.is_whitespace() && !quoted => {
+                if !token.is_empty() {
+                    out.push(std::mem::take(&mut token));
+                }
+            }
+            c => token.push(c),
+        }
+    }
+    if quoted {
+        return Err("The scanner arguments have an unmatched quote.".into());
+    }
+    if !token.is_empty() {
+        out.push(token);
+    }
+    Ok(out)
 }
 
 fn rand_u16() -> u16 {

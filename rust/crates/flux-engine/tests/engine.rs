@@ -237,3 +237,38 @@ async fn downloads_go_through_the_proxy_with_its_credentials() {
     assert!(flux_engine::Proxy { url: "ftp://x:1".into(), ..Default::default() }.normalized().is_err());
     assert_eq!(flux_engine::Proxy { url: "10.0.0.1:8080".into(), username: "a b".into(), password: "p@ss".into() }.with_credentials().unwrap(), "http://a%20b:p%40ss@10.0.0.1:8080/");
 }
+
+/// A tiny site: two pages linking to files, a page elsewhere and a type that is not wanted.
+async fn start_site() -> String {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    tokio::spawn(async move {
+        loop {
+            let Ok((mut socket, _)) = listener.accept().await else { return };
+            tokio::spawn(async move {
+                let mut buffer = vec![0u8; 4096];
+                let n = socket.read(&mut buffer).await.unwrap_or(0);
+                let request = String::from_utf8_lossy(&buffer[..n]).to_string();
+                let path = request.split_whitespace().nth(1).unwrap_or("/").to_string();
+                let body = match path.as_str() {
+                    "/" => format!(r#"<a href="/files/a.zip">a</a> <a href='page2.html'>next</a> <a href="https://other.test/x.zip">x</a> <a href="notes.txt">t</a> <a href="http://127.0.0.1:{port}/files/a.zip#again">dup</a>"#),
+                    "/page2.html" => r#"<a HREF="/files/b.PDF?v=2&amp;k=1">b</a>"#.to_string(),
+                    _ => String::new(),
+                };
+                let status = if body.is_empty() { "404 Not Found" } else { "200 OK" };
+                let reply = format!("HTTP/1.1 {status}\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
+                let _ = socket.write_all(reply.as_bytes()).await;
+            });
+        }
+    });
+    format!("http://127.0.0.1:{port}/")
+}
+
+#[tokio::test]
+async fn the_grabber_follows_one_site_and_lists_the_wanted_files() {
+    let root = start_site().await;
+    let files = engine().grab(&Url::parse(&root).unwrap(), "zip pdf", None).await.unwrap();
+    assert_eq!(files, [format!("{root}files/a.zip"), format!("{root}files/b.PDF?v=2&k=1")]);
+    assert!(engine().grab(&Url::parse(&root).unwrap(), " ", None).await.is_err(), "no types, nothing to look for");
+}

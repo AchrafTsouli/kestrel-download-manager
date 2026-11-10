@@ -328,8 +328,7 @@ async fn confirm_video(app: AppHandle, manager: Mgr<'_>, windows: State<'_, Wind
         windows.pending.lock().unwrap().remove(&choice.pending_id);
         // Many videos at once go through the main queue rather than all starting together.
         if choice.start == "now" && added > 0 {
-            manager.running_queues.lock().unwrap().insert(model::MAIN_QUEUE.into());
-            manager.schedule();
+            manager.run_waiting(model::MAIN_QUEUE);
         }
         let _ = app.emit("message", format!("{}: added {added} of {} videos{}.", playlist.title, choice.entries.len(), if choice.start == "now" { "" } else { " for later" }));
         return match (added, last_error) {
@@ -489,6 +488,10 @@ fn start_queue(manager: Mgr, name: String) {
     manager.start_queue(&name)
 }
 #[tauri::command]
+fn run_waiting(manager: Mgr, name: String) {
+    manager.run_waiting(&name)
+}
+#[tauri::command]
 fn stop_queue(manager: Mgr, name: String) {
     manager.stop_queue(&name)
 }
@@ -524,6 +527,7 @@ async fn show_window(app: AppHandle, name: String) -> Result<(), String> {
         "options" => open_window(&app, "options", "Options", 640.0, 520.0, true),
         "scheduler" => open_window(&app, "scheduler", "Scheduler", 680.0, 500.0, true),
         "batch" => open_window(&app, "batch", "Add batch download", 560.0, 420.0, true),
+        "grabber" => open_window(&app, "grabber", "Site grabber", 640.0, 540.0, true),
         _ => show_main(&app),
     }
     Ok(())
@@ -542,6 +546,13 @@ fn power_action(app: AppHandle, action: AfterQueue) -> Result<(), String> {
 fn exit_app(app: AppHandle) {
     app.state::<Shared>().shutdown();
     app.exit(0);
+}
+/// Site grabber: links to files of the given types on one site.
+#[tauri::command]
+async fn grab_site(manager: Mgr<'_>, url: String, extensions: String) -> Result<Vec<String>, String> {
+    let root = url::Url::parse(url.trim()).map_err(|_| "Enter a full address starting with http:// or https://.".to_string())?;
+    let session = manager.with_login(&root, None);
+    manager.engine.grab(&root, &extensions, session.as_ref()).await
 }
 #[tauri::command]
 async fn check_updates(app: AppHandle) -> Result<updates::UpdateInfo, String> {
@@ -725,7 +736,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             list_downloads, get_download, get_settings, save_settings, offer_url, get_pending, confirm_pending, cancel_pending,
-            probe_video, video_exact_cut, confirm_video, video_as_file, load_torrent, confirm_torrent, open_torrent_file, check_updates, install_update, drag_item,
+            probe_video, video_exact_cut, confirm_video, video_as_file, load_torrent, confirm_torrent, open_torrent_file, check_updates, install_update, drag_item, grab_site, run_waiting,
             add_downloads, pause_downloads, resume_downloads, pause_all, resume_all, remove_downloads, remove_completed,
             rename_download, redownload, set_speed_limit, set_queue, enqueue, start_queue, stop_queue, running_queues,
             open_file, show_in_folder, open_folder, show_progress, show_window, power_action, exit_app, app_version
