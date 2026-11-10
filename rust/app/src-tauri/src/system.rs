@@ -92,6 +92,32 @@ pub fn set_autostart(enabled: bool) {
     }
 }
 
+/// Keeps the browser extension connected: when a browser has no Flux bridge registered, or the
+/// registration points to a file that is gone (an uninstalled Flux 1.x), this Flux's bridge is
+/// registered. A working registration of another copy is left alone.
+pub fn ensure_browser_bridge() {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        let registered = |browser: &str| -> Option<std::path::PathBuf> {
+            let key = format!(r"HKCU\Software\{browser}\NativeMessagingHosts\com.swiftfetch.bridge");
+            let out = Command::new("reg").args(["query", &key, "/ve"]).creation_flags(0x0800_0000).output().ok()?;
+            let text = String::from_utf8_lossy(&out.stdout).into_owned();
+            let value = text.lines().find(|l| l.contains("REG_SZ"))?.split("REG_SZ").nth(1)?.trim().to_string();
+            Some(value.into())
+        };
+        let browsers = [r"Google\Chrome", r"Microsoft\Edge", r"BraveSoftware\Brave-Browser"];
+        if browsers.iter().all(|b| registered(b).is_some_and(|manifest| manifest.is_file())) {
+            return;
+        }
+        let Ok(exe) = std::env::current_exe() else { return };
+        let host = exe.with_file_name("flux-nmhost.exe");
+        if host.is_file() {
+            let _ = Command::new(host).arg("--register").creation_flags(0x0800_0000).status();
+        }
+    }
+}
+
 /// Holds the mutex the installer checks (`AppMutex`), so it asks to close a running Flux instead
 /// of replacing files in use. Same name as Flux 1.x.
 pub fn hold_running_mutex() {

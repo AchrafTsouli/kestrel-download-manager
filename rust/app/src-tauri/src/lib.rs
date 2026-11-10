@@ -771,6 +771,8 @@ pub fn run() {
             let handle = app.handle().clone();
             crash::install(app.package_info().version.to_string());
             system::hold_running_mutex();
+            // Off the start-up path: a few registry reads, and a registration when it is missing.
+            std::thread::spawn(system::ensure_browser_bridge);
             let data_dir = flux_store::default_directory();
             let manager = Manager::open(handle.clone(), &data_dir).map_err(Box::<dyn std::error::Error>::from)?;
             app.manage(manager.clone());
