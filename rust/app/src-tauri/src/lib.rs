@@ -2,6 +2,7 @@
 
 mod bridge;
 mod desktop;
+mod i18n;
 mod manager;
 mod media;
 mod migrate;
@@ -661,13 +662,23 @@ fn clipboard_monitor(app: AppHandle) {
     });
 }
 
+/// The tray menu in the interface language.
+fn tray_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
+    let language = i18n::resolve(&app.state::<Shared>().settings.read().unwrap().language);
+    let item = |id: &str, text: &'static str| MenuItem::with_id(app, id, i18n::tr(language, text), true, None::<&str>);
+    let (show, add, pause, resume, quit) = (item("show", "Open Flux")?, item("add", "Add URL…")?, item("pause", "Pause all")?, item("resume", "Resume all")?, item("quit", "Exit")?);
+    Menu::with_items(app, &[&show, &add, &PredefinedMenuItem::separator(app)?, &pause, &resume, &PredefinedMenuItem::separator(app)?, &quit])
+}
+
 fn tray(app: &AppHandle) -> tauri::Result<()> {
-    let show = MenuItem::with_id(app, "show", "Open Flux", true, None::<&str>)?;
-    let add = MenuItem::with_id(app, "add", "Add URL…", true, None::<&str>)?;
-    let pause = MenuItem::with_id(app, "pause", "Pause all", true, None::<&str>)?;
-    let resume = MenuItem::with_id(app, "resume", "Resume all", true, None::<&str>)?;
-    let quit = MenuItem::with_id(app, "quit", "Exit", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&show, &add, &PredefinedMenuItem::separator(app)?, &pause, &resume, &PredefinedMenuItem::separator(app)?, &quit])?;
+    let menu = tray_menu(app)?;
+    // A new interface language rebuilds the menu.
+    let handle = app.clone();
+    app.listen("settings", move |_| {
+        if let (Some(tray), Ok(menu)) = (handle.tray_by_id("flux"), tray_menu(&handle)) {
+            let _ = tray.set_menu(Some(menu));
+        }
+    });
     TrayIconBuilder::with_id("flux")
         .icon(app.default_window_icon().cloned().expect("app icon"))
         .tooltip("Flux")

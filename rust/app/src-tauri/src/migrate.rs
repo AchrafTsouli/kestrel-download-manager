@@ -393,6 +393,9 @@ mod seed {
         settings.auto_check_updates = false;
         settings.auto_update_tools = false;
         settings.monitor_clipboard = false;
+        if let Ok(language) = std::env::var("FLUX_TEST_LANGUAGE") {
+            settings.language = language;
+        }
         store.set("settings", &settings).unwrap();
         store.set("imported-v1", &true).unwrap();
     }

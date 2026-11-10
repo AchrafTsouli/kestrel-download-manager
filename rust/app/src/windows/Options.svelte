@@ -3,6 +3,7 @@
   import { open as pickFolder } from "@tauri-apps/plugin-dialog";
   import { onMount } from "svelte";
   import { call, applyTheme, categories, type Settings } from "../lib/api";
+  import { languages } from "../lib/i18n";
 
   let s: Settings | null = $state(null);
   let tab = $state("General");
@@ -47,6 +48,8 @@
           <label class="check"><input type="checkbox" bind:checked={s.monitorClipboard} /> Offer download links I copy</label>
           <label class="check"><input type="checkbox" bind:checked={s.playSounds} /> Play a sound when a download finishes</label>
           <div class="form">
+            <label for="language">Language</label>
+            <select id="language" class="input" bind:value={s.language}>{#each languages as l}<option value={l.code}>{l.name}</option>{/each}</select>
             <label for="theme">Appearance</label>
             <select id="theme" class="input" bind:value={s.theme}><option value="dark">Dark</option><option value="light">Light</option></select>
           </div>

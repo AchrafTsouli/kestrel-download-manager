@@ -50,8 +50,9 @@ fn in_view(app: &AppHandle) -> bool {
     app.get_webview_window("main").is_some_and(|w| w.is_visible().unwrap_or(false) && w.is_focused().unwrap_or(false))
 }
 
-fn notify(app: &AppHandle, title: &str, body: &str) {
-    let _ = app.notification().builder().title(title).body(body).show();
+fn notify(app: &AppHandle, title: &'static str, body: &str) {
+    let language = crate::i18n::resolve(&app.state::<Shared>().settings.read().unwrap().language);
+    let _ = app.notification().builder().title(crate::i18n::tr(language, title)).body(body).show();
 }
 
 /// A finished download: a notification, unless its "Download complete" window shows instead.

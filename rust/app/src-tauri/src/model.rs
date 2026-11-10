@@ -351,7 +351,7 @@ impl Default for Settings {
             show_progress_window: true,
             show_complete_dialog: true,
             theme: "dark".into(),
-            language: "en".into(),
+            language: "auto".into(),
             minimize_to_tray: true,
             start_with_windows: false,
             monitor_clipboard: true,

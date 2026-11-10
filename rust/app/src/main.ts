@@ -1,5 +1,8 @@
 import { mount } from "svelte";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { listen } from "@tauri-apps/api/event";
+import { invoke } from "@tauri-apps/api/core";
+import { setLanguage } from "./lib/i18n";
 import "./theme.css";
 import "./lib/controls.css";
 import Main from "./Main.svelte";
@@ -19,4 +22,13 @@ const [kind, ...rest] = label.split("-");
 const id = rest.join("-");
 const target = document.getElementById("app")!;
 const screens: Record<string, any> = { progress: Progress, complete: Complete, start: Start, options: Options, scheduler: Scheduler, batch: Batch, video: Video, torrent: Torrent, grabber: Grabber };
-mount(screens[kind] ?? Main, { target, props: { id } });
+// The language is set before the window is drawn, and follows Options while it is open.
+const win = getCurrentWindow();
+invoke<{ language: string }>("get_settings")
+  .then((s) => setLanguage(s.language))
+  .catch(() => setLanguage("en"))
+  .finally(() => {
+    mount(screens[kind] ?? Main, { target, props: { id } });
+    win.title().then((title) => win.setTitle(title)).catch(() => {});
+  });
+listen<{ language: string }>("settings", ({ payload }) => setLanguage(payload.language));
