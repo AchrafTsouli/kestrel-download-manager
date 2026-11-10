@@ -396,6 +396,10 @@ mod seed {
         if std::env::var_os("FLUX_TEST_DIALOGS").is_some() {
             settings.show_start_dialog = true;
         }
+        if std::env::var_os("FLUX_TEST_WINDOWS").is_some() {
+            settings.show_progress_window = true;
+            settings.show_complete_dialog = true;
+        }
         if let Ok(language) = std::env::var("FLUX_TEST_LANGUAGE") {
             settings.language = language;
         }

@@ -206,6 +206,9 @@ impl Manager {
 
     pub fn folder_for(&self, category: &str) -> PathBuf {
         let settings = self.settings.read().unwrap();
+        if let Some(dir) = settings.category_dirs.get(category).filter(|d| d.is_absolute()) {
+            return dir.clone();
+        }
         if settings.category_folders && category != "Other" { settings.download_dir.join(category) } else { settings.download_dir.clone() }
     }
 

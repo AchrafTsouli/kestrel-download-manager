@@ -57,6 +57,8 @@ pub struct PendingRequest {
 #[derive(Default)]
 pub struct Windows {
     pending: Mutex<HashMap<String, Pending>>,
+    /// What to do when a download finishes (the progress window's "Options on completion").
+    after: Mutex<HashMap<String, AfterQueue>>,
 }
 
 type Mgr<'a> = State<'a, Shared>;
@@ -84,13 +86,13 @@ fn open_window(app: &AppHandle, label: &str, title: &str, width: f64, height: f6
 }
 
 pub fn open_progress(app: &AppHandle, id: &str) {
-    open_window(app, &format!("progress-{id}"), "Download progress", 560.0, 440.0, true);
+    open_window(app, &format!("progress-{id}"), "Download progress", 620.0, 520.0, true);
 }
 pub fn open_complete(app: &AppHandle, id: &str) {
-    open_window(app, &format!("complete-{id}"), "Download complete", 520.0, 300.0, false);
+    open_window(app, &format!("complete-{id}"), "Download complete", 560.0, 300.0, false);
 }
 fn open_start(app: &AppHandle, pending_id: &str) {
-    open_window(app, &format!("start-{pending_id}"), "Download file info", 600.0, 340.0, false);
+    open_window(app, &format!("start-{pending_id}"), "Download file info", 600.0, 360.0, false);
 }
 fn open_torrent(app: &AppHandle, pending_id: &str) {
     open_window(app, &format!("torrent-{pending_id}"), "Download torrent", 640.0, 560.0, true);
@@ -224,10 +226,18 @@ struct StartChoice {
     /// "now", "later" or "queue"
     start: String,
     queue: Option<String>,
+    /// Remember the folder for this category (1.x's "Remember this path").
+    #[serde(default)]
+    remember: bool,
 }
 #[tauri::command]
 async fn confirm_pending(app: AppHandle, manager: Mgr<'_>, windows: State<'_, Windows>, choice: StartChoice) -> Result<String, String> {
     let pending = windows.pending.lock().unwrap().get(&choice.pending_id).cloned().ok_or("This download was already added or cancelled.")?;
+    if choice.remember && std::path::Path::new(&choice.folder).is_absolute() && manager.folder_for(&choice.category) != std::path::Path::new(&choice.folder) {
+        let mut settings = manager.settings();
+        settings.category_dirs.insert(choice.category.clone(), choice.folder.clone().into());
+        manager.save_settings(settings)?;
+    }
     let start = if choice.start == "queue" { "queue".to_string() } else { choice.start.clone() };
     let id = manager.add(AddRequest {
         url: pending.request.url,
@@ -617,6 +627,30 @@ fn report_crash(id: String) -> Result<(), String> {
     crash::dismiss(&id)
 }
 #[tauri::command]
+fn set_after_complete(windows: State<'_, Windows>, id: String, action: AfterQueue) {
+    let mut after = windows.after.lock().unwrap();
+    if action == AfterQueue::Nothing { after.remove(&id); } else { after.insert(id, action); }
+}
+#[tauri::command]
+fn get_after_complete(windows: State<'_, Windows>, id: String) -> AfterQueue {
+    windows.after.lock().unwrap().get(&id).copied().unwrap_or_default()
+}
+/// Windows' "Open with" chooser for a finished file.
+#[tauri::command]
+fn open_with(manager: Mgr, id: String) -> Result<(), String> {
+    let record = manager.record(&id).ok_or("Unknown download.")?;
+    if !record.destination.exists() {
+        return Err("The file is no longer there.".into());
+    }
+    #[cfg(windows)]
+    {
+        std::process::Command::new("rundll32.exe").arg("shell32.dll,OpenAs_RunDLL").arg(&record.destination).spawn().map_err(|e| e.to_string())?;
+        Ok(())
+    }
+    #[cfg(not(windows))]
+    system::open_path(&record.destination)
+}
+#[tauri::command]
 fn app_version(app: AppHandle) -> String {
     app.package_info().version.to_string()
 }
@@ -752,6 +786,13 @@ pub fn run() {
                 if let Some(window) = completer.get_webview_window(&format!("progress-{id}")) { let _ = window.close(); }
                 if settings.play_sounds { system::sound(true); }
                 if settings.show_complete_dialog { open_complete(&completer, &id); }
+                // "Turn off computer / exit when done" chosen in its progress window: the main
+                // window counts down and can still cancel it.
+                if let Some(action) = completer.state::<Windows>().after.lock().unwrap().remove(&id) {
+                    let name = manager.view(&id).map(|v| v.name).unwrap_or_default();
+                    show_main(&completer);
+                    let _ = completer.emit("queue-finished", (name, action));
+                }
                 desktop::completed(&completer, &id, settings.show_complete_dialog);
             });
             let failures = handle.clone();
@@ -787,7 +828,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             list_downloads, get_download, get_settings, save_settings, offer_url, get_pending, confirm_pending, cancel_pending,
-            probe_video, video_exact_cut, confirm_video, video_as_file, load_torrent, confirm_torrent, open_torrent_file, check_updates, install_update, drag_item, grab_site, run_waiting, register_browsers, crash_reports, dismiss_crash, report_crash,
+            probe_video, video_exact_cut, confirm_video, video_as_file, load_torrent, confirm_torrent, open_torrent_file, check_updates, install_update, drag_item, grab_site, run_waiting, register_browsers, set_after_complete, get_after_complete, open_with, crash_reports, dismiss_crash, report_crash,
             add_downloads, pause_downloads, resume_downloads, pause_all, resume_all, remove_downloads, remove_completed,
             rename_download, redownload, set_speed_limit, set_queue, enqueue, start_queue, stop_queue, running_queues,
             open_file, show_in_folder, open_folder, show_progress, show_window, power_action, exit_app, app_version

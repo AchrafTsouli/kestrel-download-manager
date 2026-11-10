@@ -1,22 +1,35 @@
 <script lang="ts">
+  // The progress window, laid out like Flux 1.x's: three tabs (status, speed limiter, options on
+  // completion), the progress bar, Hide details / Pause / Cancel, then the connections.
   import { listen } from "@tauri-apps/api/event";
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import { onMount } from "svelte";
-  import { call, size, exact, percent, timeLeft, running, resumable, applyTheme, type Download, type Settings } from "../lib/api";
+  import { call, size, exact, percent, timeLeft, running, resumable, applyTheme, type AfterQueue, type Download, type Settings } from "../lib/api";
 
   let { id }: { id: string } = $props();
   let d: Download | null = $state(null);
+  let settings: Settings | null = $state(null);
+  let tab = $state("status");
   let details = $state(true);
   let limitOn = $state(false);
   let limitKb = $state(500);
+  // Options on completion
+  let turnOff = $state(false);
+  let powerKind: AfterQueue = $state("shutdown");
+  let exitWhenDone = $state(false);
   const win = getCurrentWindow();
 
   onMount(() => {
-    call<Settings>("get_settings").then((s) => applyTheme(s.theme));
+    call<Settings>("get_settings").then((s) => { settings = s; applyTheme(s.theme); });
     call<Download | null>("get_download", { id }).then((v) => { d = v; if (v) { limitOn = v.speedLimit > 0; if (v.speedLimit) limitKb = Math.round(v.speedLimit / 1024); } });
+    call<AfterQueue>("get_after_complete", { id }).then((a) => {
+      if (a === "exit") exitWhenDone = true;
+      else if (a !== "nothing") { turnOff = true; powerKind = a; }
+    });
     const subs = [
       listen<Download>("download", ({ payload }) => { if (payload.id === id) d = payload; }),
       listen<string[]>("removed", ({ payload }) => { if (payload.includes(id)) win.close(); }),
+      listen<Settings>("settings", ({ payload }) => (settings = payload)),
     ];
     return () => subs.forEach((s) => s.then((f) => f()));
   });
@@ -28,6 +41,11 @@
   function applyLimit() { if (d) call("set_speed_limit", { id, bytesPerSecond: limitOn ? Math.max(1, limitKb) * 1024 : 0 }); }
   const toggle = () => d && (running(d.status) || d.status === "Queued" ? call("pause_downloads", { ids: [id] }) : call("resume_downloads", { ids: [id] }));
   async function cancel() { if (d && running(d.status)) await call("pause_downloads", { ids: [id] }); win.close(); }
+
+  const showComplete = $derived(settings?.showCompleteDialog ?? true);
+  function setShowComplete(on: boolean) { if (settings) call("save_settings", { settings: { ...settings, showCompleteDialog: on } }); }
+  function applyAfter() { call("set_after_complete", { id, action: turnOff ? powerKind : exitWhenDone ? "exit" : "nothing" }); }
+  const statusText = $derived(!d ? "" : d.status === "Downloading" ? "Receiving data…" : d.status === "Connecting" ? "Connecting…" : d.status + (d.error ? ` · ${d.error}` : ""));
 </script>
 
 <div class="win">
@@ -35,28 +53,66 @@
     {#if !d}
       <p class="muted">This download is no longer in the list.</p>
     {:else}
-      <div class="head">
-        <div class="url" title={d.url}>{d.url}</div>
+      <div class="tabbox">
+        <div class="tabs" role="tablist">
+          <button role="tab" class="tab" class:on={tab === "status"} onclick={() => (tab = "status")}>Download status</button>
+          <button role="tab" class="tab" class:on={tab === "limiter"} onclick={() => (tab = "limiter")}>Speed Limiter</button>
+          <button role="tab" class="tab" class:on={tab === "after"} onclick={() => (tab = "after")}>Options on completion</button>
+        </div>
+        <div class="page">
+          {#if tab === "status"}
+            <div class="url" title={d.url}>{d.url}</div>
+            <dl class="kv">
+              <dt>Status</dt><dd class="accent" class:bad={d.status === "Failed"}>{statusText}</dd>
+              <dt>File size</dt><dd>{d.total != null ? (d.estimated ? "≈ " : "") + size(d.total) : "Unknown"}</dd>
+              <dt>Downloaded</dt><dd>{size(d.written, "0 B")} ( {percent(d).toFixed(2)} % )</dd>
+              <dt>Transfer rate</dt><dd class="strong">{d.bytesPerSecond > 0 ? size(d.bytesPerSecond) + "/sec" : "—"}</dd>
+              <dt>Time left</dt><dd>{timeLeft(d)}</dd>
+              <dt>Resume capability</dt>
+              {#if d.kind === "video"}<dd class="good">Yes: video parts are kept while paused</dd>
+              {:else if d.kind === "torrent"}<dd class="good">Yes: a torrent continues where it stopped</dd>
+              {:else}<dd class={d.resumable ? "good" : "warn"}>{d.total == null && !d.resumable ? "Unknown until the server answers" : d.resumable ? "Yes" : "No: this server does not allow resuming"}</dd>{/if}
+            </dl>
+          {:else if tab === "limiter"}
+            <div class="pane">
+              <div class="line"><span class="muted label">Transfer rate</span><b>{d.bytesPerSecond > 0 ? size(d.bytesPerSecond) + "/sec" : "0 KB/sec"}</b></div>
+              <label class="check"><input type="checkbox" bind:checked={limitOn} onchange={applyLimit} /> Use Speed Limiter</label>
+              <div class="line indent"><span class="muted">Maximum download speed:</span><input class="input num" type="number" min="1" bind:value={limitKb} disabled={!limitOn} onchange={applyLimit} aria-label="Maximum speed in KB/s" /><span class="muted">KBytes/sec</span></div>
+              <p class="hint">The limit stays with this file when it is paused and resumed.</p>
+            </div>
+          {:else}
+            <div class="pane">
+              <div class="path" title={d.path}>Save To: {d.path}</div>
+              <label class="check"><input type="checkbox" checked={showComplete} onchange={(e) => setShowComplete((e.currentTarget as HTMLInputElement).checked)} /> Show download complete dialog</label>
+              <p class="hint">These settings are unavailable when "Show download complete dialog" is turned on</p>
+              <div class="line">
+                <label class="check"><input type="checkbox" bind:checked={turnOff} disabled={showComplete} onchange={() => { if (turnOff) exitWhenDone = false; applyAfter(); }} /> Turn off computer when done</label>
+                <select class="input kind" bind:value={powerKind} disabled={showComplete || !turnOff} onchange={applyAfter}>
+                  <option value="shutdown">Shut down</option><option value="sleep">Sleep</option><option value="hibernate">Hibernate</option>
+                </select>
+              </div>
+              <label class="check"><input type="checkbox" bind:checked={exitWhenDone} disabled={showComplete} onchange={() => { if (exitWhenDone) turnOff = false; applyAfter(); }} /> Exit Flux when done</label>
+            </div>
+          {/if}
+        </div>
       </div>
-      <dl class="kv">
-        <dt>Status</dt><dd class:bad={d.status === "Failed"}>{d.status === "Downloading" ? "Receiving data…" : d.status}{d.error && d.status !== "Downloading" ? ` · ${d.error}` : ""}</dd>
-        <dt>File size</dt><dd>{d.total != null ? (d.estimated ? "≈ " : "") + size(d.total) : "Unknown"}</dd>
-        <dt>Downloaded</dt><dd>{size(d.written, "0 B")} ({percent(d).toFixed(2)}%)</dd>
-        <dt>Transfer rate</dt><dd>{d.bytesPerSecond > 0 ? size(d.bytesPerSecond) + "/s" : "—"}</dd>
-        <dt>Time left</dt><dd>{timeLeft(d)}</dd>
-        <dt>Resume capability</dt>
-        {#if d.kind === "video"}<dd class="good">Yes: video parts are kept while paused</dd>
-        {:else if d.kind === "torrent"}<dd class="good">Yes: a torrent continues where it stopped</dd>
-        {:else}<dd class={d.resumable ? "good" : "warn"}>{d.total == null && !d.resumable ? "Unknown until the server answers" : d.resumable ? "Yes" : "No: this server does not allow resuming"}</dd>{/if}
-      </dl>
+
       <div class="track" aria-label="Progress"><i style:width="{percent(d)}%"></i></div>
       {#if d.phase}
         <div class="phase"><span>{d.phase}…</span>{#if d.phaseFraction != null}<span class="muted">{Math.round(d.phaseFraction * 100)}%</span>{/if}</div>
-        <div class="track second" class:busy={d.phaseFraction == null} aria-label={d.phase}><i style:width="{(d.phaseFraction ?? 1) * 100}%"></i></div>
+        <div class="track thin" class:busy={d.phaseFraction == null} aria-label={d.phase}><i style:width="{(d.phaseFraction ?? 1) * 100}%"></i></div>
       {/if}
       {#if d.note}<p class="note">{d.note}</p>{/if}
 
+      <div class="actions">
+        <button class="btn" onclick={() => (details = !details)}>{details ? "<< Hide details" : "Show details >>"}</button>
+        <div class="grow"></div>
+        <button class="btn" onclick={toggle} disabled={d.status === "Completed"}>{running(d.status) || d.status === "Queued" ? "Pause" : resumable(d.status) ? "Resume" : "Pause"}</button>
+        <button class="btn" onclick={cancel}>{running(d.status) ? "Cancel" : "Close"}</button>
+      </div>
+
       {#if details && d.kind === "file"}
+        <div class="muted small">Start positions and download progress by connections</div>
         <div class="map" aria-label="Parts of the file">
           {#each parts as p}<span class="part" style:left="{p.left}%" style:width="{p.width}%"><i style:width="{p.fill}%"></i></span>{/each}
         </div>
@@ -66,34 +122,46 @@
             <div class="conn"><span>{i + 1}</span><span>{size(s.done, "0 B")}</span><span class="muted">{s.end != null && s.done >= s.end - s.start + 1 ? "Complete" : running(d.status) ? "Receiving data…" : "Waiting"}</span></div>
           {/each}
         </div>
-        <div class="limit row">
-          <label class="check"><input type="checkbox" bind:checked={limitOn} onchange={applyLimit} /> Speed limiter</label>
-          <input class="input num" type="number" min="1" bind:value={limitKb} disabled={!limitOn} onchange={applyLimit} aria-label="Maximum speed in KB/s" /> <span class="muted">KB/s</span>
-          <span class="muted bytes">{exact(d.written)}</span>
-        </div>
+        <div class="muted bytes">{exact(d.written)}</div>
       {/if}
     {/if}
-  </div>
-  <div class="win-actions">
-    <div class="left"><button class="btn" onclick={() => (details = !details)}>{details ? "« Hide details" : "Show details »"}</button></div>
-    <button class="btn primary" onclick={toggle} disabled={!d || d.status === "Completed"}>{d && (running(d.status) || d.status === "Queued") ? "Pause" : d && resumable(d.status) ? "Resume" : "Pause"}</button>
-    <button class="btn" onclick={cancel}>{d && running(d.status) ? "Cancel" : "Close"}</button>
   </div>
 </div>
 
 <style>
-  .head { display: flex; align-items: center; gap: 8px; }
-  .url { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--accent); }
+  .win-body { display: flex; flex-direction: column; gap: 10px; }
+  .tabbox { border: 1px solid var(--line); border-radius: 3px; background: var(--chrome); padding: 4px; }
+  .tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--line); }
+  .tab { padding: 5px 12px; border: 1px solid var(--line); border-bottom: 0; border-radius: 3px 3px 0 0; background: var(--raised); color: var(--muted); cursor: default; margin-bottom: -1px; }
+  .tab.on { background: var(--surface); color: var(--text); }
+  .page { background: var(--surface); border: 1px solid var(--line); border-top: 0; padding: 10px 10px 12px; min-height: 172px; }
+  .url { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-bottom: 8px; }
+  .kv { display: grid; grid-template-columns: 116px 1fr; row-gap: 6px; margin: 0; }
+  .kv dt { color: var(--muted); }
+  .kv dd { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .accent { color: var(--accent); } .strong { font-weight: 600; }
   .bad { color: var(--bad); } .good { color: var(--good); } .warn { color: var(--warn); }
-  .map { position: relative; height: 14px; background: var(--bg); border: 1px solid var(--line); border-radius: 3px; overflow: hidden; }
-  .part { position: absolute; top: 0; bottom: 0; border-right: 1px solid var(--surface); background: color-mix(in srgb, var(--accent) 12%, transparent); }
-  .part i { display: block; height: 100%; background: var(--accent); }
-  .conns { border: 1px solid var(--line); border-radius: 4px; max-height: 130px; overflow: auto; font-variant-numeric: tabular-nums; }
-  .conn { display: grid; grid-template-columns: 40px 110px 1fr; gap: 8px; padding: 3px 8px; border-bottom: 1px solid color-mix(in srgb, var(--line) 50%, transparent); }
-  .conn.head { color: var(--muted); background: var(--chrome); position: sticky; top: 0; }
-  .phase { display: flex; justify-content: space-between; }
-  .second.busy i { opacity: 0.45; animation: pulse 1.2s ease-in-out infinite alternate; }
+  .pane { display: flex; flex-direction: column; gap: 8px; }
+  .line { display: flex; align-items: center; gap: 8px; }
+  .label { width: 130px; }
+  .indent { padding-inline-start: 18px; }
+  .num { width: 70px; flex: none !important; }
+  .kind { width: 120px; flex: none !important; }
+  .hint { margin: 0; color: var(--muted); font-size: 11px; }
+  .path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .track { height: 16px; }
+  .track.thin { height: 6px; }
+  .track.busy i { opacity: 0.45; animation: pulse 1.2s ease-in-out infinite alternate; }
   @keyframes pulse { to { opacity: 0.9; } }
-  .num { width: 90px; flex: none !important; }
-  .bytes { margin-left: auto; font-variant-numeric: tabular-nums; }
+  .phase { display: flex; justify-content: space-between; color: var(--muted); font-size: 11px; }
+  .actions { display: flex; gap: 8px; }
+  .grow { flex: 1; }
+  .small { font-size: 11px; }
+  .map { position: relative; height: 22px; background: var(--bg); border: 1px solid var(--line); border-radius: 2px; overflow: hidden; }
+  .part { position: absolute; top: 0; bottom: 0; border-inline-end: 1px solid #c0392b; background: color-mix(in srgb, var(--accent) 12%, transparent); }
+  .part i { display: block; height: 100%; background: linear-gradient(180deg, var(--accent), color-mix(in srgb, var(--accent) 60%, #1e3a8a)); }
+  .conns { border: 1px solid var(--line); border-radius: 2px; max-height: 150px; overflow: auto; font-variant-numeric: tabular-nums; background: var(--bg); }
+  .conn { display: grid; grid-template-columns: 40px 112px 1fr; gap: 8px; padding: 3px 8px; border-bottom: 1px solid color-mix(in srgb, var(--line) 50%, transparent); }
+  .conn.head { color: var(--muted); background: var(--chrome); position: sticky; top: 0; }
+  .bytes { text-align: end; font-size: 11px; font-variant-numeric: tabular-nums; }
 </style>

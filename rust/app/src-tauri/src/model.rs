@@ -265,6 +265,8 @@ pub struct Settings {
     pub disconnect_vpn_when_idle: bool,
     /// Unpack finished archives into a folder beside them.
     pub extract_archives: bool,
+    /// Folders remembered per category from the start dialog ("Remember this path").
+    pub category_dirs: std::collections::HashMap<String, PathBuf>,
     /// …and delete the archive once it is unpacked.
     pub delete_extracted_archives: bool,
 }
@@ -384,6 +386,7 @@ impl Default for Settings {
             connect_vpn: false,
             disconnect_vpn_when_idle: false,
             extract_archives: false,
+            category_dirs: Default::default(),
             delete_extracted_archives: false,
         }
     }
