@@ -336,6 +336,10 @@
   "Unpack archives (zip, 7z, rar) into a folder when they finish": "Décompresser les archives (zip, 7z, rar) dans un dossier une fois terminées",
   "Then delete the archive": "Puis supprimer l'archive",
   "Unpacking the archive…": "Décompression de l'archive…",
+  "Flux closed unexpectedly": "Flux s'est fermé de façon inattendue",
+  "Flux stopped because of an error last time. Sending the report helps fix it; it opens on GitHub, where you can read and change it before sending.": "Flux s'est arrêté à cause d'une erreur la dernière fois. Envoyer le rapport aide à la corriger ; il s'ouvre sur GitHub, où vous pouvez le lire et le modifier avant de l'envoyer.",
+  "Report on GitHub": "Signaler sur GitHub",
+  "Don't send": "Ne pas envoyer",
   "Options saved.": "Options enregistrées.",
   "Su": "Di", "Mo": "Lu", "Tu": "Ma", "We": "Me", "Th": "Je", "Fr": "Ve", "Sa": "Sa"
 }

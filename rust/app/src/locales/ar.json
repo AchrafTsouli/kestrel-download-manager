@@ -336,6 +336,10 @@
   "Unpack archives (zip, 7z, rar) into a folder when they finish": "فك ضغط الأرشيفات (zip وrar و7z) في مجلد عند اكتمالها",
   "Then delete the archive": "ثم حذف الأرشيف",
   "Unpacking the archive…": "جارٍ فك ضغط الأرشيف…",
+  "Flux closed unexpectedly": "أُغلق Flux بشكل غير متوقع",
+  "Flux stopped because of an error last time. Sending the report helps fix it; it opens on GitHub, where you can read and change it before sending.": "توقف Flux بسبب خطأ في المرة السابقة. إرسال التقرير يساعد على إصلاحه؛ يُفتح على GitHub حيث يمكنك قراءته وتعديله قبل الإرسال.",
+  "Report on GitHub": "الإبلاغ على GitHub",
+  "Don't send": "عدم الإرسال",
   "Options saved.": "تم حفظ الخيارات.",
   "Su": "أحد", "Mo": "إثن", "Tu": "ثلا", "We": "أرب", "Th": "خمي", "Fr": "جمع", "Sa": "سبت"
 }

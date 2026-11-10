@@ -26,6 +26,8 @@
   type UpdateInfo = { current: string; version: string; available: boolean; signed: boolean; url: string };
   let update: UpdateInfo | null = $state(null);
   let installing = $state(false);
+  // A crash last time: offered once as a GitHub issue the user reads and sends.
+  let crash: { id: string; text: string } | null = $state(null);
   async function checkUpdates() {
     menu = null; message = "Checking for updates…";
     try {
@@ -70,6 +72,7 @@
     call<Settings>("get_settings").then((s) => { settings = s; applyTheme(s.theme); });
     call<string[]>("running_queues").then((q) => (runningQueues = q));
     call<string>("app_version").then((v) => (version = v));
+    call<{ id: string; text: string }[]>("crash_reports").then((list) => (crash = list[0] ?? null));
     const subscriptions = [
       listen<Download>("download", ({ payload }) => {
         const i = downloads.findIndex((d) => d.id === payload.id);
@@ -397,6 +400,22 @@
   </div>
 {/if}
 
+{#if crash}
+  <div class="scrim" role="presentation">
+    <div class="dialog small" role="dialog" aria-labelledby="crash-title">
+      <div class="dialog-title" id="crash-title">Flux closed unexpectedly</div>
+      <div class="dialog-body">
+        <p>Flux stopped because of an error last time. Sending the report helps fix it; it opens on GitHub, where you can read and change it before sending.</p>
+        <pre class="report">{crash.text}</pre>
+      </div>
+      <div class="dialog-actions">
+        <button class="btn primary" onclick={() => { call("report_crash", { id: crash!.id }); crash = null; }}>Report on GitHub</button>
+        <button class="btn" onclick={() => { call("dismiss_crash", { id: crash!.id }); crash = null; }}>Don't send</button>
+      </div>
+    </div>
+  </div>
+{/if}
+
 {#if update}
   <div class="scrim" role="presentation">
     <div class="dialog small" role="dialog" aria-labelledby="update-title">
@@ -424,6 +443,7 @@
 {/if}
 
 <style>
+  .report { max-height: 160px; overflow: auto; white-space: pre-wrap; font-size: 12px; background: var(--bg); border: 1px solid var(--line); border-radius: 4px; padding: 8px; }
   .window { display: grid; grid-template-rows: auto auto 1fr auto; height: 100%; }
   .menubar { display: flex; align-items: center; height: 26px; padding: 0 6px; background: var(--chrome); }
   .menu-root { position: relative; }

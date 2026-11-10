@@ -1,6 +1,7 @@
 //! Flux 2.0's desktop app: windows, tray, scheduler and commands on top of the download manager.
 
 mod bridge;
+mod crash;
 mod desktop;
 mod extract;
 mod i18n;
@@ -601,6 +602,21 @@ fn drag_item(manager: Mgr, id: String) -> Result<DragItem, String> {
     Ok(DragItem { path: record.destination.to_string_lossy().into_owned(), icon: desktop::drag_icon()?.to_string_lossy().into_owned() })
 }
 #[tauri::command]
+fn crash_reports() -> Vec<crash::Report> {
+    crash::pending()
+}
+#[tauri::command]
+fn dismiss_crash(id: String) -> Result<(), String> {
+    crash::dismiss(&id)
+}
+/// Opens the report as a new GitHub issue in the browser (the user reads it and sends it there).
+#[tauri::command]
+fn report_crash(id: String) -> Result<(), String> {
+    let url = crash::issue_url(&id)?;
+    system::open_path(std::path::Path::new(&url))?;
+    crash::dismiss(&id)
+}
+#[tauri::command]
 fn app_version(app: AppHandle) -> String {
     app.package_info().version.to_string()
 }
@@ -719,6 +735,7 @@ pub fn run() {
         .manage(Windows::default())
         .setup(|app| {
             let handle = app.handle().clone();
+            crash::install(app.package_info().version.to_string());
             system::hold_running_mutex();
             let data_dir = flux_store::default_directory();
             let manager = Manager::open(handle.clone(), &data_dir).map_err(Box::<dyn std::error::Error>::from)?;
@@ -770,7 +787,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             list_downloads, get_download, get_settings, save_settings, offer_url, get_pending, confirm_pending, cancel_pending,
-            probe_video, video_exact_cut, confirm_video, video_as_file, load_torrent, confirm_torrent, open_torrent_file, check_updates, install_update, drag_item, grab_site, run_waiting, register_browsers,
+            probe_video, video_exact_cut, confirm_video, video_as_file, load_torrent, confirm_torrent, open_torrent_file, check_updates, install_update, drag_item, grab_site, run_waiting, register_browsers, crash_reports, dismiss_crash, report_crash,
             add_downloads, pause_downloads, resume_downloads, pause_all, resume_all, remove_downloads, remove_completed,
             rename_download, redownload, set_speed_limit, set_queue, enqueue, start_queue, stop_queue, running_queues,
             open_file, show_in_folder, open_folder, show_progress, show_window, power_action, exit_app, app_version
