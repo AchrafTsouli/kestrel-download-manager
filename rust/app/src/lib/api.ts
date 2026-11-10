@@ -26,7 +26,7 @@ export type Download = {
 export type AfterQueue = "nothing" | "exit" | "sleep" | "hibernate" | "shutdown";
 export type Queue = { name: string; maxActive: number; scheduleEnabled: boolean; startTime: string | null; stopTime: string | null; days: number[]; after: AfterQueue; retries: number };
 export type Settings = {
-  downloadDir: string; categoryFolders: boolean; connections: number; speedLimit: number; showStartDialog: boolean; showProgressWindow: boolean;
+  downloadDir: string; categoryFolders: boolean; connections: number; speedLimit: number; lastSpeedLimit: number; showStartDialog: boolean; showProgressWindow: boolean;
   showCompleteDialog: boolean; theme: string; language: string; minimizeToTray: boolean; startWithWindows: boolean; monitorClipboard: boolean;
   playSounds: boolean; maxRetries: number; proxy: string; proxyUsername: string; proxyPassword: string; userAgent: string; queues: Queue[]; hostLimits: Record<string, number>;
   updateFeed: string; autoCheckUpdates: boolean; autoUpdateTools: boolean; lastUpdateCheckMs: number; captureExtensions: string;

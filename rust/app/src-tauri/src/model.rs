@@ -224,6 +224,8 @@ pub struct Settings {
     pub connections: usize,
     /// Bytes per second for all downloads together; 0 = unlimited.
     pub speed_limit: u64,
+    /// The last limit in force, brought back by "Speed limiter > Turn on".
+    pub last_speed_limit: u64,
     pub show_start_dialog: bool,
     pub show_progress_window: bool,
     pub show_complete_dialog: bool,
@@ -394,6 +396,7 @@ impl Default for Settings {
             category_folders: true,
             connections: 8,
             speed_limit: 0,
+            last_speed_limit: 0,
             show_start_dialog: true,
             show_progress_window: true,
             show_complete_dialog: true,

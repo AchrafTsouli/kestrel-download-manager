@@ -243,10 +243,7 @@
   // Speed limiter: on/off keeps the last limit chosen in Options.
   function limiter(on: boolean) {
     if (!settings) return;
-    let last = 0;
-    try { last = Number(localStorage.getItem("kestrel.limit")) || 0; } catch {}
-    if (!on && settings.speedLimit > 0) try { localStorage.setItem("kestrel.limit", String(settings.speedLimit)); } catch {}
-    const speedLimit = on ? (last || 1024 * 1024) : 0;
+    const speedLimit = on ? (settings.lastSpeedLimit || 1024 * 1024) : 0;
     call("save_settings", { settings: { ...settings, speedLimit } });
     message = on ? `Speed limiter on: ${size(speedLimit)}/s for all downloads.` : "Speed limiter off.";
   }

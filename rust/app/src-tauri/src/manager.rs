@@ -189,6 +189,9 @@ impl Manager {
             settings.queues.insert(0, crate::model::Queue::default());
         }
         self.engine.host_limits.replace(settings.host_limits.clone());
+        if settings.speed_limit > 0 {
+            settings.last_speed_limit = settings.speed_limit;
+        }
         self.engine.global_limiter.set_rate(settings.speed_limit);
         self.store.lock().unwrap().set("settings", &settings).map_err(|e| e.to_string())?;
         *self.settings.write().unwrap() = settings.clone();

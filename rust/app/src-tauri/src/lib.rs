@@ -20,7 +20,7 @@ use std::sync::Mutex;
 use manager::{AddRequest, Manager, Probe, Shared, now_ms};
 use model::{AfterQueue, Settings, View};
 use serde::{Deserialize, Serialize};
-use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
+use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Emitter, Listener, Manager as _, State, WebviewUrl, WebviewWindowBuilder, WindowEvent};
 
@@ -787,21 +787,88 @@ fn clipboard_monitor(app: AppHandle) {
     });
 }
 
-/// The tray menu in the interface language.
-fn tray_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
-    let language = i18n::resolve(&app.state::<Shared>().settings.read().unwrap().language);
-    let item = |id: &str, text: &'static str| MenuItem::with_id(app, id, i18n::tr(language, text), true, None::<&str>);
-    let (show, add, pause, resume, quit) = (item("show", "Open Kestrel")?, item("add", "Add URL…")?, item("pause", "Pause all")?, item("resume", "Resume all")?, item("quit", "Exit")?);
-    Menu::with_items(app, &[&show, &add, &PredefinedMenuItem::separator(app)?, &pause, &resume, &PredefinedMenuItem::separator(app)?, &quit])
+/// What the tray menu shows; it is rebuilt only when this changes (a rebuild closes an open menu).
+#[derive(Clone, PartialEq, Default)]
+struct TrayLook {
+    language: String,
+    limiter: bool,
+    main_running: bool,
+    running: Vec<(String, String)>,
+}
+fn tray_look(manager: &Shared) -> TrayLook {
+    let settings = manager.settings.read().unwrap();
+    TrayLook {
+        language: i18n::resolve(&settings.language).to_string(),
+        limiter: settings.speed_limit > 0,
+        main_running: manager.running_queues.lock().unwrap().iter().any(|q| q == crate::model::MAIN_QUEUE),
+        running: manager.views().into_iter().filter(|v| v.status.running()).map(|v| (v.id, v.name)).collect(),
+    }
+}
+/// A download's name as the menu shows it: short, and "&" doubled (menus read it as a shortcut mark).
+fn menu_name(name: &str) -> String {
+    let mut s: String = name.chars().take(48).collect();
+    if name.chars().count() > 48 {
+        s.push('…');
+    }
+    s.replace('&', "&&")
+}
+
+/// The tray menu in the interface language, like MDM's.
+fn tray_menu(app: &AppHandle, look: &TrayLook) -> tauri::Result<Menu<tauri::Wry>> {
+    let language = look.language.as_str();
+    let item = |id: &str, text: &'static str, on: bool| MenuItem::with_id(app, id, i18n::tr(language, text), on, None::<&str>);
+    let sep = || PredefinedMenuItem::separator(app);
+    let downloads = Submenu::new(app, i18n::tr(language, "Downloads in progress"), !look.running.is_empty())?;
+    for (id, name) in &look.running {
+        downloads.append(&MenuItem::with_id(app, format!("dl:{id}"), menu_name(name), true, None::<&str>)?)?;
+    }
+    let limiter = Submenu::with_items(app, i18n::tr(language, "Speed Limiter"), true, &[
+        &CheckMenuItem::with_id(app, "limit-on", i18n::tr(language, "Turn on"), true, look.limiter, None::<&str>)?,
+        &CheckMenuItem::with_id(app, "limit-off", i18n::tr(language, "Turn off"), true, !look.limiter, None::<&str>)?,
+    ])?;
+    Menu::with_items(app, &[
+        &item("show", "Open Kestrel", true)?,
+        &sep()?,
+        &item("add", "Add new download", true)?,
+        &item("batch", "Add batch download", true)?,
+        &downloads,
+        &sep()?,
+        &limiter,
+        &item("scheduler", "Scheduler", true)?,
+        &item("queue-start", "Start main download queue", !look.main_running)?,
+        &item("queue-stop", "Stop main download queue", look.main_running)?,
+        &item("pause", "Pause all", true)?,
+        &item("resume", "Resume all", true)?,
+        &item("options", "Options", true)?,
+        &sep()?,
+        &item("quit", "Exit", true)?,
+    ])
+}
+
+fn set_limiter(app: &AppHandle, on: bool) {
+    let manager = app.state::<Shared>();
+    let mut settings = manager.settings();
+    settings.speed_limit = if on { if settings.last_speed_limit > 0 { settings.last_speed_limit } else { 1024 * 1024 } } else { 0 };
+    let _ = manager.save_settings(settings);
 }
 
 fn tray(app: &AppHandle) -> tauri::Result<()> {
-    let menu = tray_menu(app)?;
-    // A new interface language rebuilds the menu.
+    let first = tray_look(&app.state::<Shared>());
+    let menu = tray_menu(app, &first)?;
+    // Kept in step with the app (language, limiter, queue, running downloads), rebuilt only on change.
     let handle = app.clone();
-    app.listen("settings", move |_| {
-        if let (Some(tray), Ok(menu)) = (handle.tray_by_id("flux"), tray_menu(&handle)) {
-            let _ = tray.set_menu(Some(menu));
+    std::thread::spawn(move || {
+        let mut shown = first;
+        loop {
+            std::thread::sleep(std::time::Duration::from_millis(1000));
+            let look = tray_look(&handle.state::<Shared>());
+            if look == shown {
+                continue;
+            }
+            if let (Some(tray), Ok(menu)) = (handle.tray_by_id("flux"), tray_menu(&handle, &look)) {
+                let _ = tray.set_menu(Some(menu));
+            }
+            shown = look;
         }
     });
     TrayIconBuilder::with_id("flux")
@@ -812,10 +879,21 @@ fn tray(app: &AppHandle) -> tauri::Result<()> {
         .on_menu_event(|app, event| match event.id.as_ref() {
             "show" => show_main(app),
             "add" => { show_main(app); let _ = app.emit("open-add", ()); }
+            "batch" => open_window(app, "batch", "Add batch download", 560.0, 420.0, true),
+            "scheduler" => open_window(app, "scheduler", "Scheduler", 680.0, 500.0, true),
+            "options" => open_window(app, "options", "Options", 720.0, 600.0, true),
+            "limit-on" => set_limiter(app, true),
+            "limit-off" => set_limiter(app, false),
+            "queue-start" => app.state::<Shared>().start_queue(crate::model::MAIN_QUEUE),
+            "queue-stop" => app.state::<Shared>().stop_queue(crate::model::MAIN_QUEUE),
             "pause" => app.state::<Shared>().pause_all(),
             "resume" => app.state::<Shared>().resume_all(),
             "quit" => { app.state::<Shared>().shutdown(); app.exit(0); }
-            _ => {}
+            other => {
+                if let Some(id) = other.strip_prefix("dl:") {
+                    open_progress(app, id);
+                }
+            }
         })
         .on_tray_icon_event(|tray, event| {
             if let TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, .. } = event {
