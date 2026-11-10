@@ -1,9 +1,13 @@
 (() => {
   let enabled = false;
   let policy = {};
-  chrome.storage.local.get(["captureEnabled", "capturePolicy"]).then(value => { enabled = value.captureEnabled !== false; policy = value.capturePolicy || {}; });
+  let paused = [];
+  // The page's own site (the top one, inside a frame): the popup can pause Kestrel there.
+  const site = (() => { try { const top = location.ancestorOrigins?.length ? location.ancestorOrigins[location.ancestorOrigins.length - 1] : location.href; return new URL(top).hostname; } catch { return location.hostname; } })();
+  chrome.storage.local.get(["captureEnabled", "capturePolicy", "pausedSites"]).then(value => { enabled = value.captureEnabled !== false; policy = value.capturePolicy || {}; paused = value.pausedSites || []; });
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area !== "local") return;
+    if (changes.pausedSites) paused = changes.pausedSites.newValue || [];
     if (changes.captureEnabled) enabled = changes.captureEnabled.newValue !== false;
     if (changes.capturePolicy) policy = changes.capturePolicy.newValue || {};
   });
@@ -11,7 +15,7 @@
   setInterval(refresh, 30000);
   const key = (event, name) => ({ Alt: event.altKey, Control: event.ctrlKey, Shift: event.shiftKey })[name] || false;
   document.addEventListener("click", async event => {
-    if (!enabled || policy.enabled === false || !event.isTrusted || event.defaultPrevented || event.button !== 0 || event.metaKey || key(event, policy.bypassKey || "Alt")) return;
+    if (!enabled || paused.includes(site) || policy.enabled === false || !event.isTrusted || event.defaultPrevented || event.button !== 0 || event.metaKey || key(event, policy.bypassKey || "Alt")) return;
     const force = key(event, policy.forceKey || "Shift");
     if (!force && (event.ctrlKey || event.shiftKey || event.altKey)) return;
     const link = event.composedPath().find(element => element?.tagName === "A");

@@ -68,7 +68,7 @@ test("private fallback is captured and its status stays out of local storage", a
   await captureDownload(f.api, value, async request => assert.equal(request.url, value.url));
   assert.deepEqual(f.calls, ["pause", "cancel"]);
   assert.equal(f.local.lastMessage, undefined);
-  assert.equal(f.session.lastMessage, "Download sent to SwiftFetch.");
+  assert.equal(f.session.lastMessage, "Download sent to Kestrel.");
   assert.equal(f.session["handoff-7"], undefined);
 });
 
@@ -116,7 +116,7 @@ test("background accepts private direct clicks and context-menu transfers", asyn
     await new Promise(resolve => setImmediate(resolve));
     assert.equal(requests.filter(request => request.action === "download").length, 2);
     assert.equal(f.local.lastMessage, undefined);
-    assert.equal(f.session.lastMessage, "Link sent to SwiftFetch.");
+    assert.equal(f.session.lastMessage, "Sent to Kestrel.");
     assert.equal(messageHandler({ action: "direct-click", url: item().url }, { ...sender, id: "other-extension" }, () => assert.fail()), undefined);
   } finally {
     if (previous === undefined) delete globalThis.chrome; else globalThis.chrome = previous;

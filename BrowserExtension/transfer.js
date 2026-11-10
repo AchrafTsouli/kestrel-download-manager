@@ -27,9 +27,9 @@ export function sendNative(api, request, timeoutMs = 22000) {
       port = api.runtime.connectNative(HOST);
       port.onMessage.addListener(response => {
         if (response?.ok) finish(null, response);
-        else finish(new Error(response?.error || "SwiftFetch rejected the download."));
+        else finish(new Error(response?.error || "Kestrel refused the download."));
       });
-      port.onDisconnect.addListener(() => finish(new Error(api.runtime.lastError?.message || "SwiftFetch browser bridge is unavailable. Run Install-BrowserBridge.ps1.")));
+      port.onDisconnect.addListener(() => finish(new Error(api.runtime.lastError?.message || "Kestrel is not reachable. Start Kestrel once, or reinstall it, to connect the browser.")));
       port.postMessage(request);
     } catch (error) { finish(error); }
   });
@@ -71,13 +71,13 @@ export async function captureDownload(api, item, native = request => sendNative(
     await api.storage.session.set({ [key]: { id: item.id, request, accepted: true } });
     await api.downloads.cancel(item.id);
     try { if (api.downloads.erase) await api.downloads.erase({ id: item.id }); } catch { /* Handoff succeeded; history cleanup is optional. */ }
-    await statusStorage(api).set({ lastMessage: "Download sent to SwiftFetch." });
+    await statusStorage(api).set({ lastMessage: "Download sent to Kestrel." });
     await api.action.setBadgeText({ text: "" });
   } catch (error) {
     if (paused && !accepted) {
       try { await api.downloads.resume(item.id); } catch { /* Download ended or was cancelled by the user. */ }
     }
-    await statusStorage(api).set({ lastMessage: accepted ? "SwiftFetch accepted the file, but the browser copy could not be cancelled." : `Kept in browser: ${error.message}` });
+    await statusStorage(api).set({ lastMessage: accepted ? "Kestrel took the file, but the browser copy could not be cancelled." : `Kept in browser: ${error.message}` });
     await api.action.setBadgeText({ text: "!" });
     await api.action.setBadgeBackgroundColor({ color: "#C2410C" });
   } finally {

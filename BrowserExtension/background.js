@@ -6,7 +6,13 @@ import { downloadSession, installHeaderCapture } from "./session.js";
 installHeaderCapture(chrome);
 
 const recovery = recoverHandoffs(chrome).catch(console.error);
-const captureIfWanted = item => recovery.then(async () => { await refreshPolicy(); const { capturePolicy = {} } = await chrome.storage.local.get("capturePolicy"); if (shouldCapture(item.url || item.finalUrl, item.filename, capturePolicy)) await captureDownload(chrome, item); });
+// Sites where the popup paused Kestrel: nothing is captured there.
+const hostOf = url => { try { return new URL(url).hostname; } catch { return ""; } };
+async function pausedOn(...urls) {
+  const { pausedSites = [] } = await chrome.storage.local.get("pausedSites");
+  return urls.some(url => url && pausedSites.includes(hostOf(url)));
+}
+const captureIfWanted = item => recovery.then(async () => { if (await pausedOn(item.referrer, item.url || item.finalUrl)) return; await refreshPolicy(); const { capturePolicy = {} } = await chrome.storage.local.get("capturePolicy"); if (shouldCapture(item.url || item.finalUrl, item.filename, capturePolicy)) await captureDownload(chrome, item); });
 if (chrome.downloads.onDeterminingFilename) {
   // Chromium: unlike onCreated, this event includes the server/browser's suggested filename.
   chrome.downloads.onDeterminingFilename.addListener((item, suggest) => {
@@ -27,7 +33,7 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
   if (message.action === "magnet") {
     (async () => {
       const { captureEnabled = true } = await chrome.storage.local.get("captureEnabled");
-      if (!captureEnabled || !/^magnet:\?(.*&)?xt=urn:btih:/i.test(message.url || "") || message.url.length > 8192) return { ok: false };
+      if (!captureEnabled || await pausedOn(sender.tab.url) || !/^magnet:\?(.*&)?xt=urn:btih:/i.test(message.url || "") || message.url.length > 8192) return { ok: false };
       await sendNative(chrome, { action: "download", url: message.url, requestId: crypto.randomUUID() });
       return { ok: true };
     })().then(reply).catch(() => reply({ ok: false }));
@@ -36,11 +42,11 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
   if (message.action !== "direct-click" || !directUrl(message.url)) return;
   (async () => {
     const { captureEnabled = true } = await chrome.storage.local.get("captureEnabled");
-    await refreshPolicy(); const { capturePolicy = {} } = await chrome.storage.local.get("capturePolicy"); if (!captureEnabled || !shouldCapture(message.url, message.fileName, capturePolicy, message.force)) { reply({ ok: false }); return; }
+    await refreshPolicy(); const { capturePolicy = {} } = await chrome.storage.local.get("capturePolicy"); if (!captureEnabled || await pausedOn(sender.tab.url) || !shouldCapture(message.url, message.fileName, capturePolicy, message.force)) { reply({ ok: false }); return; }
     try {
       const session = await downloadSession(chrome, message.url, sender.tab.id, sender.tab.url);
       await sendNative(chrome, { action: "download", url: message.url, fileName: message.fileName || "", requestId: crypto.randomUUID(), session });
-      await statusStorage(chrome).set({ lastMessage: "Download opened directly in SwiftFetch." }).catch(() => {});
+      await statusStorage(chrome).set({ lastMessage: "Download opened in Kestrel." }).catch(() => {});
       reply({ ok: true });
     } catch (error) {
       const { browserFallbacks = [] } = await chrome.storage.session.get("browserFallbacks");
@@ -59,14 +65,21 @@ chrome.runtime.onInstalled.addListener(() => {
     chrome.scripting.executeScript({ target: { tabId: tab.id, allFrames: true }, files: ['media-policy.js', 'video-panel-policy.js', 'video-panel.js'] })
   ))).catch(console.error);
   chrome.contextMenus.removeAll(() => {
-    chrome.contextMenus.create({ id: "swiftfetch-download", title: "Download with SwiftFetch", contexts: ["link"], targetUrlPatterns: ["http://*/*", "https://*/*"] });
+    const web = ["http://*/*", "https://*/*"];
+    chrome.contextMenus.create({ id: "swiftfetch-download", title: "Download with Kestrel", contexts: ["link"], targetUrlPatterns: web });
+    chrome.contextMenus.create({ id: "kestrel-media", title: "Download this video with Kestrel", contexts: ["video", "audio"] });
+    chrome.contextMenus.create({ id: "kestrel-image", title: "Download image with Kestrel", contexts: ["image"], targetUrlPatterns: web });
+    chrome.contextMenus.create({ id: "kestrel-page", title: "Download this page's video with Kestrel", contexts: ["page"], documentUrlPatterns: web });
   });
 });
 
 chrome.contextMenus.onClicked.addListener((info, tab) => {
-  if (info.menuItemId !== "swiftfetch-download" || !directUrl(info.linkUrl)) return;
-  downloadSession(chrome, info.linkUrl, tab?.id, info.pageUrl).then(session => sendNative(chrome, { action: "download", url: info.linkUrl, requestId: crypto.randomUUID(), session }))
-    .then(() => statusStorage(chrome).set({ lastMessage: "Link sent to SwiftFetch." }))
+  // A video or audio playing from a blob or stream has no file address: Kestrel reads the page instead.
+  const media = info.menuItemId === "kestrel-media" ? (directUrl(info.srcUrl) ? info.srcUrl : info.pageUrl) : null;
+  const url = { "swiftfetch-download": info.linkUrl, "kestrel-image": info.srcUrl, "kestrel-page": info.pageUrl }[info.menuItemId] ?? media;
+  if (!url || !directUrl(url)) return;
+  downloadSession(chrome, url, tab?.id, info.pageUrl).then(session => sendNative(chrome, { action: "download", url, requestId: crypto.randomUUID(), session }))
+    .then(() => statusStorage(chrome).set({ lastMessage: "Sent to Kestrel." }))
     .catch(async error => {
       await statusStorage(chrome).set({ lastMessage: error.message });
       await chrome.action.setBadgeText({ text: "!" });

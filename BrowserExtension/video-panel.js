@@ -1,7 +1,7 @@
 (() => {
-  if (globalThis.apexVideoPanelVersion === '1.0.0') return;
+  if (globalThis.apexVideoPanelVersion === '1.1.0') return;
   globalThis.apexVideoPanelDispose?.();
-  globalThis.apexVideoPanelVersion = '1.0.0';
+  globalThis.apexVideoPanelVersion = '1.1.0';
   const events = new AbortController();
   document.querySelectorAll('[data-apex-video-panel]').forEach(host => host.remove());
   const panels = new Map();
@@ -22,10 +22,12 @@
   let refreshTimer;
   const requestScan = () => { clearTimeout(refreshTimer); refreshTimer = setTimeout(scan, 100); };
   const started = video => playbackStarted.has(video) || video.currentTime > 0;
-  const read = () => chrome.storage.local.get(['captureEnabled', 'videoPanelEnabled', 'capturePolicy']).then(value => { options = value; scan(); }).catch(() => {});
-  const storageChanged = (changes, area) => { if (area === 'local' && ['captureEnabled', 'videoPanelEnabled', 'capturePolicy'].some(key => changes[key])) read(); };
+  const read = () => chrome.storage.local.get(['captureEnabled', 'videoPanelEnabled', 'capturePolicy', 'pausedSites']).then(value => { options = value; scan(); }).catch(() => {});
+  const storageChanged = (changes, area) => { if (area === 'local' && ['captureEnabled', 'videoPanelEnabled', 'capturePolicy', 'pausedSites'].some(key => changes[key])) read(); };
   chrome.storage.onChanged.addListener(storageChanged);
-  const allowed = () => options.captureEnabled !== false && options.capturePolicy?.enabled !== false && (options.videoPanelEnabled ?? true);
+  // The top page's site: the popup can pause Kestrel there.
+  const site = (() => { try { const top = location.ancestorOrigins?.length ? location.ancestorOrigins[location.ancestorOrigins.length - 1] : location.href; return new URL(top).hostname; } catch { return location.hostname; } })();
+  const allowed = () => options.captureEnabled !== false && !(options.pausedSites || []).includes(site) && options.capturePolicy?.enabled !== false && (options.videoPanelEnabled ?? true);
   function sources(video) {
     return [{ url: video.currentSrc || video.src, type: video.getAttribute('type') || '' }, ...[...video.querySelectorAll('source')].map(source => ({ url: source.src, type: source.type }))].filter(item => /^https?:\/\//i.test(item.url));
   }
@@ -44,25 +46,53 @@
   const sizeText = size => !size ? 'Size unknown' : size >= 1073741824 ? `${(size / 1073741824).toFixed(2)} GB` : `${(size / 1048576).toFixed(2)} MB`;
   function makePanel(video) {
     const host = document.createElement('div');
-    host.setAttribute('data-apex-video-panel', '1.0.0');
+    host.setAttribute('data-apex-video-panel', '1.1.0');
     host.style.cssText = 'all:initial!important;position:fixed!important;z-index:2147483647!important;display:none!important;';
     const root = host.attachShadow({ mode: 'closed' });
+    const ARROW = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11m0 0-4.5-4.5M12 15l4.5-4.5M5 19.5h14"/></svg>';
     root.innerHTML = `<style>
-      :host{color-scheme:dark}*{box-sizing:border-box} .panel{font:12px/1.4 "Segoe UI",Arial,sans-serif;color:#e6eef5;direction:ltr;text-align:left}
-      button{font:inherit;color:inherit;cursor:pointer}button:focus-visible{outline:2px solid #7dd3fc;outline-offset:2px}button:disabled{opacity:.6;cursor:wait}
-      .bar{display:flex;width:max-content;max-width:calc(100vw - 8px);border:1px solid #2f5b80;border-radius:5px;background:#141c25;box-shadow:0 2px 9px #0006;overflow:hidden;touch-action:none;user-select:none;cursor:grab}
-      .move{border:0;background:transparent;padding:3px 6px;color:#9fb3c6;cursor:grab}.dragging,.dragging button{cursor:grabbing}
-      .trigger{border:0;background:transparent;padding:5px 10px;font-weight:600}.arrow{color:#38bdf8;margin-right:6px}.close{border:0;border-left:1px solid #2f5b80;background:transparent;padding:3px 9px;color:#9fb3c6}
-      button:hover{background:#1d2c3c}.menu{margin-top:4px;width:min(410px,calc(100vw - 20px));padding:6px;background:#111922;border:1px solid #2c3a4a;border-radius:7px;box-shadow:0 7px 25px #0007}
-      [hidden]{display:none!important}.heading{padding:5px 7px;color:#9fb3c6;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.all{width:100%;text-align:left;background:#173451;border:0;border-radius:4px;padding:7px 9px;color:#7dd3fc}
-      .list{max-height:220px;overflow:auto;margin-top:4px}.source{display:block;width:100%;text-align:left;background:transparent;border:0;border-radius:4px;padding:8px}.source strong{display:block;font-weight:600}.meta{display:block;color:#8496a8;font-size:11px;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-      .load{margin:4px 0;background:transparent;color:#a9bccd;font-size:11px;border:1px solid #2c3a4a}
-      .status{padding:6px 7px;color:#c4d1dd;font-size:11px}.note{padding:4px 7px;color:#8496a8;font-size:11px}
-    </style><div class="panel"><div class="bar"><button class="trigger" aria-expanded="false" aria-haspopup="true"><span class="arrow">▼</span>Download this video</button><button class="close" aria-label="Hide video download panel" title="Hide for this player">×</button></div><div class="menu" hidden><div class="heading"></div><button class="all">↓ Download all sources</button><button class="load all" hidden>Load available qualities</button><div class="list"></div><div class="status" role="status" aria-live="polite"></div><div class="note">Kestrel video downloads · audio included in listed qualities</div></div></div>`;
+      :host{color-scheme:dark}*{box-sizing:border-box}
+      .panel{font:12.5px/1.4 "Segoe UI",system-ui,Arial,sans-serif;color:#dde7f0;direction:ltr;text-align:left;-webkit-font-smoothing:antialiased}
+      button{font:inherit;color:inherit;cursor:pointer;margin:0}button:focus-visible{outline:2px solid #7dd3fc;outline-offset:2px}button:disabled{opacity:.55;cursor:wait}
+      svg{width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round;flex:none}
+      .bar{display:flex;align-items:center;width:max-content;max-width:calc(100vw - 8px);padding:3px;gap:2px;border-radius:999px;background:rgba(14,20,27,.82);backdrop-filter:blur(10px) saturate(1.4);border:1px solid rgba(125,211,252,.28);box-shadow:0 6px 22px rgba(0,0,0,.45);touch-action:none;user-select:none;cursor:grab;transition:border-color .15s}
+      .bar:hover{border-color:rgba(125,211,252,.6)}
+      .move{border:0;background:transparent;padding:4px 3px 4px 7px;color:#6b7f93;cursor:grab;font-size:11px;line-height:1}.dragging,.dragging button{cursor:grabbing}
+      .trigger{display:flex;align-items:center;gap:7px;border:0;border-radius:999px;background:linear-gradient(135deg,#38bdf8,#0ea5e9);color:#04121c;padding:6px 13px 6px 9px;font-weight:700;letter-spacing:.1px;box-shadow:inset 0 1px 0 rgba(255,255,255,.35)}
+      .trigger:hover{filter:brightness(1.08)}.trigger[aria-expanded="true"]{background:linear-gradient(135deg,#7dd3fc,#38bdf8)}
+      .trigger .chev{width:12px;height:12px;margin-left:1px;transition:transform .15s}.trigger[aria-expanded="true"] .chev{transform:rotate(180deg)}
+      .close{display:grid;place-items:center;width:24px;height:24px;border:0;border-radius:50%;background:transparent;color:#8496a8;font-size:15px;line-height:1}
+      .close:hover{background:rgba(248,113,113,.18);color:#fca5a5}
+      .menu{margin-top:6px;width:min(400px,calc(100vw - 20px));padding:8px;background:rgba(17,24,32,.96);backdrop-filter:blur(14px);border:1px solid #243140;border-radius:12px;box-shadow:0 14px 40px rgba(0,0,0,.55);animation:pop .14s ease-out}
+      @keyframes pop{from{opacity:0;transform:translateY(-4px) scale(.98)}}
+      [hidden]{display:none!important}
+      .top{display:flex;align-items:center;gap:9px;padding:4px 4px 8px}
+      .mark{display:grid;place-items:center;width:28px;height:28px;border-radius:8px;background:linear-gradient(135deg,rgba(56,189,248,.25),rgba(129,140,248,.25));color:#7dd3fc;flex:none}
+      .titles{min-width:0;flex:1;display:grid}
+      .heading{font-weight:600;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+      .site{color:#8496a8;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+      .all{display:flex;align-items:center;justify-content:center;gap:7px;width:100%;background:rgba(56,189,248,.12);border:1px solid rgba(56,189,248,.35);border-radius:8px;padding:7px 9px;color:#7dd3fc;font-weight:600}
+      .all:hover{background:rgba(56,189,248,.2)}
+      .load{margin:2px 0 4px;background:transparent;border-style:dashed;color:#a9bccd;font-weight:500;font-size:11.5px}
+      .list{max-height:250px;overflow:auto;margin-top:4px;display:grid;gap:2px;scrollbar-width:thin;scrollbar-color:#2c3a4a transparent}
+      .source{display:flex;align-items:center;gap:10px;width:100%;text-align:left;background:transparent;border:1px solid transparent;border-radius:8px;padding:7px 8px}
+      .source:hover{background:#18222d;border-color:#243140}.source:hover .get{background:#38bdf8;color:#04121c}
+      .badge{min-width:52px;padding:3px 6px;border-radius:6px;background:#1d2834;color:#dde7f0;font-weight:700;font-size:11.5px;text-align:center;flex:none}
+      .badge.hd{background:linear-gradient(135deg,rgba(56,189,248,.28),rgba(129,140,248,.28));color:#e0f2fe}
+      .badge.audio{background:rgba(74,222,128,.16);color:#86efac}
+      .info{min-width:0;flex:1;display:grid}
+      .info strong{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+      .meta{color:#8496a8;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+      .size{color:#a9bccd;font-size:11.5px;font-variant-numeric:tabular-nums;white-space:nowrap}
+      .get{display:grid;place-items:center;width:28px;height:28px;border-radius:50%;background:#1d2834;color:#7dd3fc;flex:none;transition:background .12s,color .12s}
+      .status{padding:7px 6px 2px;color:#c4d1dd;font-size:11.5px}.status:empty{display:none}
+      .note{display:flex;align-items:center;gap:6px;margin-top:6px;padding:7px 6px 1px;border-top:1px solid #1f2a36;color:#6b7f93;font-size:10.5px;letter-spacing:.2px}
+      .note b{color:#8496a8;font-weight:700;letter-spacing:.6px}
+    </style><div class="panel"><div class="bar"><button class="trigger" aria-expanded="false" aria-haspopup="true">${ARROW}<span>Download this video</span><svg class="chev" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></button><button class="close" aria-label="Hide video download panel" title="Hide for this video">×</button></div><div class="menu" hidden><div class="top"><span class="mark">${ARROW}</span><div class="titles"><div class="heading"></div><div class="site"></div></div></div><button class="all">${ARROW}Download all sources</button><button class="load all" hidden>Load available qualities</button><div class="list"></div><div class="status" role="status" aria-live="polite"></div><div class="note"><b>KESTREL</b> · audio is included in every quality</div></div></div>`;
     const select = selector => root.querySelector(selector);
     const panel = { video, host, root, items: [], signature: '', busy: false, loading: false, catalog: null, page: null, dismissed: false, source: video.currentSrc || video.src };
     const bar = select('.bar');
-    const move = document.createElement('button'); move.className = 'move'; move.textContent = '⠿';
+    const move = document.createElement('button'); move.className = 'move'; move.textContent = '⋮⋮';
     move.setAttribute('aria-label', 'Move video download panel'); move.title = 'Drag to move · arrow keys to move · Home to reset'; bar.prepend(move);
     const menu = select('.menu'), trigger = select('.trigger'), list = select('.list'), status = select('.status');
     const title = () => panel.catalog?.title || video.getAttribute('title') || document.title || 'Video';
@@ -72,13 +102,24 @@
       if (signature === panel.signature) return;
       panel.signature = signature;
       list.replaceChildren(); select('.heading').textContent = title(); select('.heading').title = title();
-      select('.all').hidden = items.length < 2;
+      select('.site').textContent = location.hostname.replace(/^www\./, '');
+      select('.all:not(.load)').hidden = items.length < 2 || !!panel.catalog;
       if (!panel.busy) status.textContent = ''; 
       for (const [index, item] of items.entries()) {
         const button = document.createElement('button'); button.className = 'source';
-        const label = document.createElement('strong'); label.textContent = `${index + 1}. ${item.label || item.format + " video"} · ${item.approximate ? "≈ " : ""}${sizeText(item.size)}`;
-        const meta = document.createElement('span'); meta.className = 'meta'; meta.textContent = `${title()} · ${new URL(item.url || panel.page).hostname}`;
-        button.append(label, meta); button.addEventListener('click', () => download([item])); list.append(button);
+        const text = item.label || `${item.format || 'Video'} video`;
+        const quality = (text.match(/\b(\d{3,4})p\d*\b/i) || text.match(/\b(\d{3,4})x(\d{3,4})\b/))?.[0] || (/audio|m4a|mp3|opus/i.test(text) ? 'Audio' : (item.format || 'Video').toUpperCase());
+        const height = parseInt((quality.match(/x(\d+)/) || quality.match(/(\d+)p/) || [])[1] || '0', 10);
+        const badge = document.createElement('span'); badge.className = 'badge' + (height >= 720 ? ' hd' : quality === 'Audio' ? ' audio' : ''); badge.textContent = height >= 2160 ? '4K' : quality;
+        const info = document.createElement('span'); info.className = 'info';
+        const label = document.createElement('strong'); label.textContent = text;
+        let where = ''; try { where = new URL(item.url || panel.page).hostname.replace(/^www\./, ''); } catch {}
+        const meta = document.createElement('span'); meta.className = 'meta'; meta.textContent = [item.format?.toUpperCase(), where].filter(Boolean).join(' · ') || `Source ${index + 1}`;
+        info.append(label, meta);
+        const amount = document.createElement('span'); amount.className = 'size'; amount.textContent = item.size ? `${item.approximate ? '≈ ' : ''}${sizeText(item.size)}` : '';
+        const get = document.createElement('span'); get.className = 'get'; get.innerHTML = ARROW;
+        button.title = `Download ${text}`;
+        button.append(badge, info, amount, get); button.addEventListener('click', () => download([item])); list.append(button);
       }
     }
     async function refresh() {
@@ -141,7 +182,7 @@
         if (panel.page !== requestedPage || !panel.isStream && !panel.generic && requestedPage !== ApexMedia.videoPage(location.href)) return;
         panel.catalog = response.video;
         draw(response.video.formats.map(item => ({...item,size:item.totalBytes})));
-        status.textContent = 'Audio is included; Kestrel assembles separate tracks automatically.';
+        status.textContent = '';
         select('.load').textContent = 'Reload available qualities';
       } catch (error) { panel.loadError = true; status.textContent = error.message; }
       finally { panel.loading = false; select('.load').disabled = false; position(panel); }
@@ -178,7 +219,7 @@
       panel.manualPosition={x:rect.left+dx*step,y:rect.top+dy*step}; position(panel); event.preventDefault();
     });
     trigger.addEventListener('click', async event => { event.stopPropagation(); if (performance.now()<suppressClickUntil) return; menu.hidden = !menu.hidden; trigger.setAttribute('aria-expanded', String(!menu.hidden)); position(panel); if (!menu.hidden) { await refresh(); if (!panel.catalog && !panel.generic) loadFormats(); } });
-    select('.all').addEventListener('click', () => download([...panel.items]));
+    select('.all:not(.load)').addEventListener('click', () => download([...panel.items]));
     select('.close').addEventListener('click', () => { panel.dismissed = true; host.style.setProperty('display', 'none', 'important'); });
     root.addEventListener('keydown', event => { if (event.key === 'Escape') { menu.hidden = true; trigger.setAttribute('aria-expanded', 'false'); trigger.focus(); } });
     root.addEventListener('click', event => event.stopPropagation());

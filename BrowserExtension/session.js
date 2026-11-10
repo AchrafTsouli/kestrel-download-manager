@@ -22,7 +22,7 @@ export function browserHeaders(url) {
 
 export async function downloadSession(api, url, tabId, pageUrl, frameId = 0) {
   try { return await collectDownloadSession(api, url, tabId, pageUrl, frameId); }
-  catch { throw new Error("Browser session access is unavailable. Reload SwiftFetch and allow cookies for this site."); }
+  catch { throw new Error("Browser session access is unavailable. Reload Kestrel and allow cookies for this site."); }
 }
 
 async function collectDownloadSession(api, url, tabId, pageUrl, frameId) {

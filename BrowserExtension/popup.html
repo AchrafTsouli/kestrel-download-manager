@@ -7,25 +7,50 @@
   <link rel="stylesheet" href="popup.css">
 </head>
 <body>
-  <div class="brand">
-    <svg width="26" height="26" viewBox="0 0 32 32">
-      <rect x="1" y="1" width="30" height="30" rx="6" fill="#161B22" stroke="#2A3746" stroke-width="1.2"/>
-      <rect x="4.5" y="7" width="23" height="2" rx="1" fill="#3EC28F"/>
-      <rect x="4.5" y="12.5" width="23" height="2" rx="1" fill="#3EC28F"/>
-      <rect x="4.5" y="18" width="23" height="2" rx="1" fill="#3EC28F"/>
-      <rect x="4.5" y="23.5" width="23" height="2" rx="1" fill="#3EC28F"/>
-      <path d="M18 3.5 L10 15 L15 15 L11 28.5 L22 13.5 L17 13.5 Z" fill="#55FFB2" stroke="#12161C" stroke-width="1.2" stroke-linejoin="round"/>
-    </svg>
-    <h1>Kestrel</h1>
+  <header class="head">
+    <img src="icon-48.png" alt="" width="34" height="34">
+    <div class="name"><strong>Kestrel</strong><span>Download Manager</span></div>
+    <span id="state" class="state checking" role="status"><i></i><b>Checking…</b></span>
+  </header>
+
+  <section class="site" id="site-card" hidden>
+    <div class="site-text">
+      <span class="label">This site</span>
+      <strong id="site-name"></strong>
+    </div>
+    <label class="switch" title="Pause Kestrel on this site only">
+      <input id="site" type="checkbox"><span></span>
+    </label>
+  </section>
+
+  <section class="card">
+    <label class="row">
+      <span class="icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3v12m0 0-5-5m5 5 5-5M4 19h16"/></svg></span>
+      <span class="text"><strong>Capture downloads</strong><small>File links and browser downloads open in Kestrel</small></span>
+      <span class="switch"><input id="capture" type="checkbox"><span></span></span>
+    </label>
+    <label class="row">
+      <span class="icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="3"/><path d="m10 9 5 3-5 3z"/></svg></span>
+      <span class="text"><strong>Video download button</strong><small>Shows “Download this video” over playing videos</small></span>
+      <span class="switch"><input id="videos" type="checkbox"><span></span></span>
+    </label>
+  </section>
+
+  <div class="actions">
+    <button id="open" class="primary">Open Kestrel</button>
+    <button id="add" title="Add this page's address to Kestrel">Download this page</button>
   </div>
-  <p>Direct file links open straight in Kestrel.</p>
-  <label class="toggle"><input id="capture" type="checkbox"> Capture browser downloads</label>
-  <label class="toggle"><input id="videos" type="checkbox"> Show “Download this video” panels</label>
-  <div class="actions"><button id="open">Open Kestrel</button><button id="test" class="secondary">Test connection</button></div>
-  <div class="actions"><button id="refresh-videos" class="secondary">Refresh video panels on this tab</button></div>
-  <p id="status" role="status">Checking connection…</p>
-  <p class="hint" id="version"></p>
-  <p class="hint">Right-click a file link and choose “Download with Kestrel”. Browser cookies are sent only for the download URL.</p>
+  <div class="actions">
+    <button id="refresh-videos" class="ghost">Find videos on this tab</button>
+    <button id="test" class="ghost">Test connection</button>
+  </div>
+
+  <p id="status" class="message" role="status" hidden></p>
+
+  <footer>
+    <span id="hint">Right-click a link → “Download with Kestrel”</span>
+    <span id="version"></span>
+  </footer>
   <script type="module" src="popup.js"></script>
 </body>
 </html>
