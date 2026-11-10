@@ -30,7 +30,8 @@ pub fn is_portable() -> bool {
 }
 
 /// Where Flux keeps its data: `FLUX_DATA_DIR` when set (tests, separate profiles), `data` beside a
-/// portable copy, otherwise `%LOCALAPPDATA%\Flux`.
+/// portable copy, otherwise the system's place for an app's own data: `%LOCALAPPDATA%\Flux`,
+/// `~/.local/share/Flux` (or `$XDG_DATA_HOME/Flux`), `~/Library/Application Support/Flux`.
 pub fn default_directory() -> PathBuf {
     if let Some(dir) = std::env::var_os("FLUX_DATA_DIR").map(PathBuf::from).filter(|d| d.is_absolute()) {
         return dir;
@@ -40,7 +41,16 @@ pub fn default_directory() -> PathBuf {
             return folder.join("data");
         }
     }
-    std::env::var_os("LOCALAPPDATA").map(PathBuf::from).unwrap_or_else(std::env::temp_dir).join("Flux")
+    let var = |name: &str| std::env::var_os(name).map(PathBuf::from).filter(|p| p.is_absolute());
+    let base = if cfg!(windows) {
+        var("LOCALAPPDATA")
+    } else if cfg!(target_os = "macos") {
+        var("HOME").map(|h| h.join("Library/Application Support"))
+    } else {
+        var("XDG_DATA_HOME").or_else(|| var("HOME").map(|h| h.join(".local/share")))
+    };
+    // Only without any home folder at all (a bare service account) does it fall back to temp.
+    base.unwrap_or_else(std::env::temp_dir).join("Flux")
 }
 
 pub struct Store {
