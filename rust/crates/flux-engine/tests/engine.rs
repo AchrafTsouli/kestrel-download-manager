@@ -174,3 +174,66 @@ async fn speed_limit_is_respected() {
     run(&engine(), &mut job).await.unwrap();
     assert!(start.elapsed() >= Duration::from_millis(1500), "1 MB at 400 KB/s took {:?}", start.elapsed());
 }
+
+/// A minimal HTTP forward proxy: checks the credentials on each connection's first request,
+/// counts connections, then relays bytes to the origin (which accepts absolute-form requests).
+async fn start_proxy(expected_auth: &'static str) -> (String, Arc<Mutex<(usize, usize)>>) {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let counts = Arc::new(Mutex::new((0usize, 0usize))); // (connections, refused)
+    let seen = counts.clone();
+    tokio::spawn(async move {
+        loop {
+            let Ok((mut client, _)) = listener.accept().await else { return };
+            let seen = seen.clone();
+            tokio::spawn(async move {
+                let mut head = Vec::new();
+                let mut byte = [0u8; 1];
+                while !head.ends_with(b"\r\n\r\n") && head.len() < 16384 {
+                    if client.read(&mut byte).await.unwrap_or(0) == 0 { return }
+                    head.push(byte[0]);
+                }
+                let text = String::from_utf8_lossy(&head).to_string();
+                let authorized = text.lines().any(|l| l.eq_ignore_ascii_case(&format!("proxy-authorization: Basic {expected_auth}")));
+                if !authorized {
+                    seen.lock().unwrap().1 += 1;
+                    let _ = client.write_all(b"HTTP/1.1 407 Proxy Authentication Required\r\nProxy-Authenticate: Basic\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").await;
+                    return;
+                }
+                seen.lock().unwrap().0 += 1;
+                let target = text.split_whitespace().nth(1).and_then(|u| Url::parse(u).ok()).unwrap();
+                let mut origin = tokio::net::TcpStream::connect((target.host_str().unwrap(), target.port_or_known_default().unwrap())).await.unwrap();
+                origin.write_all(&head).await.unwrap();
+                let _ = tokio::io::copy_bidirectional(&mut client, &mut origin).await;
+            });
+        }
+    });
+    (format!("127.0.0.1:{}", address.port()), counts)
+}
+
+#[tokio::test]
+async fn downloads_go_through_the_proxy_with_its_credentials() {
+    let server = LabServer::start().await.unwrap();
+    // The lab server is on 127.0.0.1, which never uses a proxy; reach it by another name.
+    let url = server.url("proxied.bin", "size=3000000&seed=5").replace("127.0.0.1", "lab.localtest.me");
+    let (proxy, counts) = start_proxy("Zmx1eDpzM2NyZXQ=").await; // flux:s3cret
+    let engine = engine();
+    let mut job = Job::new(Url::parse(&url).unwrap(), temp("proxied.bin"));
+    job.connections = 3;
+
+    // Wrong password: the proxy refuses, and the download says so.
+    engine.set_network(Some(&flux_engine::Proxy { url: proxy.clone(), username: "flux".into(), password: "wrong".into() }), None).unwrap();
+    assert!(run(&engine, &mut job).await.is_err());
+    assert!(counts.lock().unwrap().1 > 0);
+
+    let mut job = Job::new(Url::parse(&url).unwrap(), temp("proxied.bin"));
+    job.connections = 3;
+    engine.set_network(Some(&flux_engine::Proxy { url: proxy, username: "flux".into(), password: "s3cret".into() }), Some("FluxTest/1.0")).unwrap();
+    assert!(matches!(run(&engine, &mut job).await.unwrap(), Outcome::Completed { bytes: 3000000, .. }));
+    assert_eq!(std::fs::read(&job.destination).unwrap(), expected(3000000, 5));
+    assert!(counts.lock().unwrap().0 > 0, "nothing went through the proxy");
+
+    assert!(flux_engine::Proxy { url: "ftp://x:1".into(), ..Default::default() }.normalized().is_err());
+    assert_eq!(flux_engine::Proxy { url: "10.0.0.1:8080".into(), username: "a b".into(), password: "p@ss".into() }.with_credentials().unwrap(), "http://a%20b:p%40ss@10.0.0.1:8080/");
+}

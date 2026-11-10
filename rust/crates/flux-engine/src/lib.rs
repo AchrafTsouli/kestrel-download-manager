@@ -18,7 +18,7 @@ pub mod session;
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, Instant};
 
 use futures_util::StreamExt;
@@ -136,9 +136,67 @@ pub enum Outcome {
 
 type Events = Arc<dyn Fn(Event) + Send + Sync>;
 
+/// A proxy every download goes through: `http://`, `https://` or `socks5://` (a bare `host:port`
+/// means HTTP), with optional credentials. Local addresses never use it.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Proxy {
+    pub url: String,
+    pub username: String,
+    pub password: String,
+}
+
+impl Proxy {
+    /// The address with a scheme, or an error a person can act on.
+    pub fn normalized(&self) -> std::result::Result<String, String> {
+        let text = self.url.trim();
+        let full = if text.contains("://") { text.to_string() } else { format!("http://{text}") };
+        let url = Url::parse(&full).map_err(|_| format!("The proxy address \"{text}\" is not valid. Use host:port, http://host:port or socks5://host:port."))?;
+        if !matches!(url.scheme(), "http" | "https" | "socks5" | "socks5h") || url.host_str().is_none() {
+            return Err("The proxy must be an http://, https:// or socks5:// address.".into());
+        }
+        Ok(full)
+    }
+    /// The address with the credentials in it, for tools that take a single URL (yt-dlp, aria2).
+    pub fn with_credentials(&self) -> std::result::Result<String, String> {
+        let mut url = Url::parse(&self.normalized()?).map_err(|e| e.to_string())?;
+        if !self.username.is_empty() {
+            let _ = url.set_username(&self.username);
+            let _ = url.set_password(Some(&self.password));
+        }
+        Ok(url.to_string())
+    }
+}
+
+fn build_client(proxy: Option<&Proxy>) -> std::result::Result<Client, String> {
+    let mut builder = Client::builder()
+        // Separate TCP connections: with HTTP/2 every "connection" would share one socket.
+        .http1_only()
+        .tcp_nodelay(true)
+        .connect_timeout(Duration::from_secs(20))
+        .pool_max_idle_per_host(64)
+        .redirect(redirect::Policy::custom(|attempt| {
+            if attempt.previous().len() >= 10 { attempt.error("too many redirects") }
+            else if unsafe_redirect(&attempt) { attempt.error("unsafe redirect") }
+            else { attempt.follow() }
+        }));
+    if let Some(proxy) = proxy {
+        let mut all = reqwest::Proxy::all(proxy.normalized()?).map_err(|e| format!("The proxy cannot be used: {e}"))?;
+        if !proxy.username.is_empty() {
+            all = all.basic_auth(&proxy.username, &proxy.password);
+        }
+        builder = builder.proxy(all.no_proxy(reqwest::NoProxy::from_string("localhost,127.0.0.1,::1")));
+    } else {
+        // No proxy chosen in Flux: no system proxy guessing either.
+        builder = builder.no_proxy();
+    }
+    builder.build().map_err(|e| format!("The connection settings cannot be used: {e}"))
+}
+
 #[derive(Clone)]
 pub struct Engine {
-    client: Client,
+    client: Arc<RwLock<Client>>,
+    /// Replaces the browser identity Flux presents (a browser session's own still wins).
+    user_agent: Arc<RwLock<Option<HeaderValue>>>,
     pub options: Arc<Options>,
     pub host_limits: HostLimits,
     pub global_limiter: Limiter,
@@ -152,25 +210,26 @@ fn unsafe_redirect(attempt: &redirect::Attempt) -> bool {
 
 impl Engine {
     pub fn new(options: Options, host_limits: HostLimits) -> Engine {
-        let client = Client::builder()
-            // Separate TCP connections: with HTTP/2 every "connection" would share one socket.
-            .http1_only()
-            .tcp_nodelay(true)
-            .connect_timeout(Duration::from_secs(20))
-            .pool_max_idle_per_host(64)
-            .redirect(redirect::Policy::custom(|attempt| {
-                if attempt.previous().len() >= 10 { attempt.error("too many redirects") }
-                else if unsafe_redirect(&attempt) { attempt.error("unsafe redirect") }
-                else { attempt.follow() }
-            }))
-            .build()
-            .expect("HTTP client");
-        Engine { client, options: Arc::new(options), host_limits, global_limiter: Limiter::default() }
+        let client = build_client(None).expect("HTTP client");
+        Engine { client: Arc::new(RwLock::new(client)), user_agent: Arc::new(RwLock::new(None)), options: Arc::new(options), host_limits, global_limiter: Limiter::default() }
+    }
+
+    /// Applies the connection settings to the downloads that start from now on.
+    pub fn set_network(&self, proxy: Option<&Proxy>, user_agent: Option<&str>) -> std::result::Result<(), String> {
+        let agent = match user_agent.map(str::trim).filter(|a| !a.is_empty()) {
+            Some(agent) => Some(HeaderValue::from_str(agent).map_err(|_| "The browser identity contains characters a header cannot carry.")?),
+            None => None,
+        };
+        let client = build_client(proxy)?;
+        *self.client.write().unwrap() = client;
+        *self.user_agent.write().unwrap() = agent;
+        Ok(())
     }
 
     fn headers(&self, job: &Job, target: &Url, session: Option<&Session>) -> HeaderMap {
         let mut headers = HeaderMap::new();
-        headers.insert(header::USER_AGENT, HeaderValue::from_static(DEFAULT_USER_AGENT));
+        let agent = self.user_agent.read().unwrap().clone().unwrap_or(HeaderValue::from_static(DEFAULT_USER_AGENT));
+        headers.insert(header::USER_AGENT, agent);
         headers.insert(header::ACCEPT, HeaderValue::from_static("*/*"));
         headers.insert(header::ACCEPT_LANGUAGE, HeaderValue::from_static("en-US,en;q=0.9"));
         headers.insert(header::ACCEPT_ENCODING, HeaderValue::from_static("identity"));
@@ -185,7 +244,8 @@ impl Engine {
 
     async fn send(&self, job: &Job, session: Option<&Session>, range: Option<(u64, Option<u64>)>, if_range: Option<&str>) -> Result<reqwest::Response> {
         let target = job.resume.final_url.as_deref().and_then(|u| Url::parse(u).ok()).unwrap_or_else(|| job.url.clone());
-        let mut request = self.client.get(target.clone()).headers(self.headers(job, &target, session));
+        let client = self.client.read().unwrap().clone();
+        let mut request = client.get(target.clone()).headers(self.headers(job, &target, session));
         if let Some((start, end)) = range {
             request = request.header(header::RANGE, match end { Some(end) => format!("bytes={start}-{end}"), None => format!("bytes={start}-") });
             if let Some(validator) = if_range {

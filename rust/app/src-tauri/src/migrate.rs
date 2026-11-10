@@ -61,7 +61,10 @@ pub fn settings(v1: &Value) -> Settings {
     s.play_sounds = flag(v1, "PlayCompletionSound", s.play_sounds);
     if let Some(n) = number(v1, "MaximumRetries") { s.max_retries = (n as u32).min(20); }
     if let Some(proxy) = text(v1, "ProxyAddress") { s.proxy = proxy; }
-    if let Some(agent) = text(v1, "ManualUserAgent") { s.user_agent = agent; }
+    if let Some(user) = text(v1, "ProxyUsername") { s.proxy_username = user; }
+    if let Some(password) = text(v1, "ProxyPassword") { s.proxy_password = password; }
+    // 1.x stored its stock (now dated) Chrome identity here; keep only one the user wrote.
+    if let Some(agent) = text(v1, "ManualUserAgent").filter(|a| !a.contains("Chrome/")) { s.user_agent = agent; }
     if let Some(limits) = v1.get("HostConnectionLimits").and_then(Value::as_object) {
         s.host_limits = limits.iter().filter_map(|(host, n)| Some((host.to_ascii_lowercase(), n.as_u64()? as usize))).collect::<HashMap<_, _>>();
     }
@@ -359,7 +362,7 @@ mod seed {
     fn seed_test_profile() {
         let dir = flux_store::default_directory();
         assert!(std::env::var_os("FLUX_DATA_DIR").is_some(), "set FLUX_DATA_DIR");
-        let mut store = flux_store::Store::open(&dir.join("history.db")).unwrap();
+        let store = flux_store::Store::open(&dir.join("history.db")).unwrap();
         let mut settings = crate::model::Settings::default();
         settings.download_dir = std::env::var_os("FLUX_TEST_DOWNLOADS").map(std::path::PathBuf::from).expect("set FLUX_TEST_DOWNLOADS");
         settings.show_start_dialog = false;

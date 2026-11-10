@@ -68,11 +68,17 @@ pub struct Tools {
     pub directory: PathBuf,
     pub update_directory: PathBuf,
     exact_cut: Mutex<Option<bool>>,
+    /// The proxy chosen in Flux's options (with its credentials), passed to yt-dlp.
+    proxy: Mutex<Option<String>>,
 }
 
 impl Tools {
     pub fn new(directory: impl Into<PathBuf>, update_directory: impl Into<PathBuf>) -> Tools {
-        Tools { directory: directory.into(), update_directory: update_directory.into(), exact_cut: Mutex::new(None) }
+        Tools { directory: directory.into(), update_directory: update_directory.into(), exact_cut: Mutex::new(None), proxy: Mutex::new(None) }
+    }
+
+    pub fn set_proxy(&self, proxy: Option<String>) {
+        *self.proxy.lock().unwrap() = proxy;
     }
 
     pub fn available(&self) -> bool {
@@ -105,6 +111,9 @@ impl Tools {
         args.push(self.javascript_runtime());
         args.push("--ffmpeg-location".into());
         args.push(self.directory.display().to_string());
+        if let Some(proxy) = self.proxy.lock().unwrap().clone() {
+            args.extend(["--proxy".into(), proxy]);
+        }
         if let Some(cookies) = cookies {
             args.extend(["--cookies".into(), cookies.display().to_string()]);
         }

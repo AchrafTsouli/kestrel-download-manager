@@ -36,6 +36,8 @@ pub struct Tools {
     pub aria2c: PathBuf,
     /// Saved metadata, one `<hash>.torrent` per torrent.
     pub cache: PathBuf,
+    /// An HTTP proxy for trackers and web seeds (aria2 cannot send peer traffic through a proxy).
+    proxy: std::sync::Mutex<Option<String>>,
 }
 
 fn common() -> Vec<String> {
@@ -67,7 +69,19 @@ fn random_hex(bytes: usize) -> String {
 
 impl Tools {
     pub fn new(aria2c: impl Into<PathBuf>, cache: impl Into<PathBuf>) -> Tools {
-        Tools { aria2c: aria2c.into(), cache: cache.into() }
+        Tools { aria2c: aria2c.into(), cache: cache.into(), proxy: std::sync::Mutex::new(None) }
+    }
+
+    /// Only HTTP proxies: aria2 has no SOCKS support.
+    pub fn set_proxy(&self, proxy: Option<String>) {
+        *self.proxy.lock().unwrap() = proxy.filter(|p| p.starts_with("http://") || p.starts_with("https://"));
+    }
+
+    fn with_proxy(&self, mut args: Vec<String>) -> Vec<String> {
+        if let Some(proxy) = self.proxy.lock().unwrap().clone() {
+            args.push(format!("--all-proxy={proxy}"));
+        }
+        args
     }
 
     pub fn available(&self) -> bool {
@@ -123,7 +137,7 @@ impl Tools {
         std::fs::create_dir_all(folder).map_err(|e| e.to_string())?;
         let mut args = common();
         args.extend(["--bt-metadata-only=true".into(), "--bt-save-metadata=true".into(), "--seed-time=0".into(), format!("--dir={}", folder.display()), magnet.into()]);
-        let mut child = self.command(&args)?;
+        let mut child = self.command(&self.with_proxy(args))?;
         let mut stderr = child.stderr.take().unwrap();
         let errors = tokio::spawn(async move {
             let mut text = String::new();
@@ -173,7 +187,7 @@ impl Tools {
             args.push(format!("--max-overall-download-limit={speed_limit}"));
         }
         args.push(selection.metadata_file.display().to_string());
-        let mut child = self.command(&args)?;
+        let mut child = self.command(&self.with_proxy(args))?;
         let mut stderr = child.stderr.take().unwrap();
         let errors = tokio::spawn(async move {
             let mut text = String::new();

@@ -13,7 +13,7 @@ export type Queue = { name: string; maxActive: number; scheduleEnabled: boolean;
 export type Settings = {
   downloadDir: string; categoryFolders: boolean; connections: number; speedLimit: number; showStartDialog: boolean; showProgressWindow: boolean;
   showCompleteDialog: boolean; theme: string; language: string; minimizeToTray: boolean; startWithWindows: boolean; monitorClipboard: boolean;
-  playSounds: boolean; maxRetries: number; proxy: string; userAgent: string; queues: Queue[]; hostLimits: Record<string, number>;
+  playSounds: boolean; maxRetries: number; proxy: string; proxyUsername: string; proxyPassword: string; userAgent: string; queues: Queue[]; hostLimits: Record<string, number>;
   updateFeed: string; autoCheckUpdates: boolean; autoUpdateTools: boolean; lastUpdateCheckMs: number; captureExtensions: string;
   captureEnabled: boolean; videoPanel: boolean; excludedSites: string; columns: string[];
 };

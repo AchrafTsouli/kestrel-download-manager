@@ -234,7 +234,11 @@ pub struct Settings {
     pub monitor_clipboard: bool,
     pub play_sounds: bool,
     pub max_retries: u32,
+    /// Proxy address (host:port, http://… or socks5://…); empty = direct connection.
     pub proxy: String,
+    pub proxy_username: String,
+    pub proxy_password: String,
+    /// Browser identity sent to sites; empty = Flux's built-in one.
     pub user_agent: String,
     pub queues: Vec<Queue>,
     pub host_limits: std::collections::HashMap<String, usize>,
@@ -269,6 +273,8 @@ impl Default for Settings {
             play_sounds: true,
             max_retries: 5,
             proxy: String::new(),
+            proxy_username: String::new(),
+            proxy_password: String::new(),
             user_agent: String::new(),
             queues: vec![Queue::default(), Queue { name: "Synchronization queue".into(), max_active: 1, ..Queue::default() }],
             host_limits: Default::default(),

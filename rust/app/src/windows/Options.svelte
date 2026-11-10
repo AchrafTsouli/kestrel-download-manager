@@ -69,6 +69,22 @@
             <div class="row"><input id="limit" class="input short" type="number" min="0" bind:value={limitKb} /> <span class="muted">KB/s for all downloads (0 = no limit)</span></div>
           </div>
           <fieldset class="group">
+            <legend>Proxy</legend>
+            <div class="form">
+              <label for="proxy">Address</label>
+              <input id="proxy" class="input" bind:value={s.proxy} placeholder="None: connect directly (e.g. 10.0.0.1:8080 or socks5://host:1080)" spellcheck="false" />
+              <label for="puser">User name</label>
+              <input id="puser" class="input" bind:value={s.proxyUsername} autocomplete="off" spellcheck="false" disabled={!s.proxy.trim()} />
+              <label for="ppass">Password</label>
+              <input id="ppass" class="input" type="password" bind:value={s.proxyPassword} autocomplete="off" disabled={!s.proxy.trim()} />
+            </div>
+            <p class="note">Used for files, videos and torrent trackers. Saved encrypted for your Windows account.</p>
+          </fieldset>
+          <div class="form">
+            <label for="ua">Browser identity</label>
+            <input id="ua" class="input" bind:value={s.userAgent} placeholder="Flux's built-in identity (a current Chrome)" spellcheck="false" />
+          </div>
+          <fieldset class="group">
             <legend>Sites that allow fewer connections</legend>
             {#if limits.length === 0}<p class="note">None yet. When a site refuses extra connections, Flux remembers how many work and uses that next time.</p>{/if}
             {#each limits as [host, n]}

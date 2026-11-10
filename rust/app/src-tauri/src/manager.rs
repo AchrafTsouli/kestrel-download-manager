@@ -114,6 +114,11 @@ impl Manager {
             live: Mutex::new(HashMap::new()),
             running_queues: Mutex::new(std::collections::HashSet::new()),
         });
+        let current = manager.settings.read().unwrap().clone();
+        if let Err(error) = manager.apply_network(&current) {
+            // Downloads go direct until the setting is corrected in Options.
+            let _ = manager.app.emit("message", format!("Proxy: {error}"));
+        }
         Ok(manager)
     }
 
@@ -155,7 +160,25 @@ impl Manager {
         let list: Vec<(String, Record)> = self.records.lock().unwrap().iter().map(|r| (r.id.clone(), r.clone())).collect();
         let _ = self.store.lock().unwrap().save_downloads(&list);
     }
+    /// Proxy and browser identity for the engine, yt-dlp and aria2.
+    fn apply_network(&self, settings: &Settings) -> Result<(), String> {
+        let proxy = (!settings.proxy.trim().is_empty()).then(|| flux_engine::Proxy {
+            url: settings.proxy.trim().to_string(),
+            username: settings.proxy_username.clone(),
+            password: settings.proxy_password.clone(),
+        });
+        self.engine.set_network(proxy.as_ref(), Some(settings.user_agent.as_str()))?;
+        let with_credentials = match &proxy {
+            Some(p) => Some(p.with_credentials()?),
+            None => None,
+        };
+        self.media.set_proxy(with_credentials.clone());
+        self.torrents.set_proxy(with_credentials);
+        Ok(())
+    }
+
     pub fn save_settings(self: &Arc<Self>, mut settings: Settings) -> Result<(), String> {
+        self.apply_network(&settings)?;
         settings.connections = settings.connections.clamp(1, 32);
         settings.max_retries = settings.max_retries.min(20);
         if settings.queues.iter().all(|q| q.name != MAIN_QUEUE) {
