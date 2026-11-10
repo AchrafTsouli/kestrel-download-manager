@@ -340,6 +340,16 @@
   "Flux stopped because of an error last time. Sending the report helps fix it; it opens on GitHub, where you can read and change it before sending.": "توقف Flux بسبب خطأ في المرة السابقة. إرسال التقرير يساعد على إصلاحه؛ يُفتح على GitHub حيث يمكنك قراءته وتعديله قبل الإرسال.",
   "Report on GitHub": "الإبلاغ على GitHub",
   "Don't send": "عدم الإرسال",
+  "{} ({} bytes)": "{} ({} بايت)",
+  "Magnet link · {}": "رابط مغناطيسي · {}",
+  "{} files · {}": "{} ملفات · {}",
+  "{} of {} files · {}. Only the chosen files are downloaded.": "{} من {} ملفات · {}. لا يُنزَّل إلا الملفات المختارة.",
+  "{} · video + audio": "{} · فيديو + صوت",
+  "{} · video only": "{} · فيديو فقط",
+  "{} · audio only · {}": "{} · صوت فقط · {}",
+  "{} · audio only": "{} · صوت فقط",
+  "{} · drag the icon to move the file anywhere": "{} · اسحب الأيقونة لنقل الملف إلى أي مكان",
+  "Downloaded {} ({})": "تم تنزيل {} ({})",
   "Options saved.": "تم حفظ الخيارات.",
   "Su": "أحد", "Mo": "إثن", "Tu": "ثلا", "We": "أرب", "Th": "خمي", "Fr": "جمع", "Sa": "سبت"
 }

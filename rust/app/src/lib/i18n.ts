@@ -22,6 +22,15 @@ let current = "en";
 const texts = new WeakMap<Node, { english: string; shown: string }>();
 const attributes = new WeakMap<Element, Record<string, { english: string; shown: string }>>();
 
+// Size units: French writes octets (Ko, Mo), Arabic its own abbreviations.
+const UNITS: Record<string, Record<string, string>> = {
+  fr: { B: "o", KB: "Ko", MB: "Mo", GB: "Go", bytes: "octets" },
+  ar: { B: "ب", KB: "ك.ب", MB: "م.ب", GB: "ج.ب", bytes: "بايت" },
+};
+export function unit(name: string): string {
+  return UNITS[current]?.[name] ?? name;
+}
+
 /** "auto" follows Windows' language when Flux has it. */
 export function resolve(code: string): string {
   if (code && code !== "auto") return catalogs[code] || code === "en" ? code : "en";
@@ -104,6 +113,8 @@ export function setLanguage(code: string) {
       patterns.push([new RegExp(`^${source}$`), translated]);
     } else exact.set(english, translated);
   }
+  // The most specific pattern first: "{} of {} files · {}. Only…" before "{} files · {}".
+  patterns.sort((a, b) => b[0].source.replace(/\(\.\+\?\)/g, "").length - a[0].source.replace(/\(\.\+\?\)/g, "").length);
   current = next;
   document.documentElement.lang = next;
   document.documentElement.dir = RTL.has(next) ? "rtl" : "ltr";

@@ -340,6 +340,16 @@
   "Flux stopped because of an error last time. Sending the report helps fix it; it opens on GitHub, where you can read and change it before sending.": "Flux s'est arrêté à cause d'une erreur la dernière fois. Envoyer le rapport aide à la corriger ; il s'ouvre sur GitHub, où vous pouvez le lire et le modifier avant de l'envoyer.",
   "Report on GitHub": "Signaler sur GitHub",
   "Don't send": "Ne pas envoyer",
+  "{} ({} bytes)": "{} ({} octets)",
+  "Magnet link · {}": "Lien magnet · {}",
+  "{} files · {}": "{} fichiers · {}",
+  "{} of {} files · {}. Only the chosen files are downloaded.": "{} fichiers sur {} · {}. Seuls les fichiers choisis sont téléchargés.",
+  "{} · video + audio": "{} · vidéo + audio",
+  "{} · video only": "{} · vidéo seule",
+  "{} · audio only · {}": "{} · audio seul · {}",
+  "{} · audio only": "{} · audio seul",
+  "{} · drag the icon to move the file anywhere": "{} · faites glisser l'icône pour déplacer le fichier",
+  "Downloaded {} ({})": "Téléchargé : {} ({})",
   "Options saved.": "Options enregistrées.",
   "Su": "Di", "Mo": "Lu", "Tu": "Ma", "We": "Me", "Th": "Je", "Fr": "Ve", "Sa": "Sa"
 }

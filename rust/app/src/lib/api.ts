@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { unit } from "./i18n";
 
 export type Status = "Queued" | "Connecting" | "Downloading" | "Retrying" | "Finishing" | "Paused" | "Completed" | "Failed";
 export type Download = {
@@ -33,12 +34,12 @@ export const resumable = (s: Status) => s === "Paused" || s === "Failed" || s ==
 
 export function size(bytes: number | null | undefined, empty = "") {
   if (bytes == null) return empty;
-  if (bytes >= 1 << 30) return (bytes / (1 << 30)).toFixed(2) + " GB";
-  if (bytes >= 1 << 20) return (bytes / (1 << 20)).toFixed(1) + " MB";
-  if (bytes >= 1024) return Math.round(bytes / 1024) + " KB";
-  return bytes + " B";
+  if (bytes >= 1 << 30) return (bytes / (1 << 30)).toFixed(2) + " " + unit("GB");
+  if (bytes >= 1 << 20) return (bytes / (1 << 20)).toFixed(1) + " " + unit("MB");
+  if (bytes >= 1024) return Math.round(bytes / 1024) + " " + unit("KB");
+  return bytes + " " + unit("B");
 }
-export const exact = (bytes: number) => bytes.toLocaleString() + " bytes";
+export const exact = (bytes: number) => bytes.toLocaleString() + " " + unit("bytes");
 export const percent = (d: Download) => (d.total ? Math.min(100, (d.written / d.total) * 100) : d.status === "Completed" ? 100 : 0);
 export function timeLeft(d: Download) {
   if (!d.total || d.bytesPerSecond <= 0 || !running(d.status)) return "—";
