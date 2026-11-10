@@ -262,6 +262,7 @@ impl Tools {
         }
         args.extend(format_arguments(&job.selection));
         args.extend(clip_arguments(&job.selection));
+        args.extend(subtitle_arguments(&job.selection));
         args.extend([
             "--output".into(),
             work.join("result.%(ext)s").display().to_string(),
@@ -298,12 +299,13 @@ impl Tools {
             }
         }
         let run = run?;
-        if run.code != Some(0) {
+        let result_file = result_file.filter(|file| file.parent() == Some(work.as_path()) && file.file_name().is_some_and(|n| n.to_string_lossy().starts_with("result.")) && file.exists());
+        // A missing subtitle language (or a site refusing one) must not cost the video itself.
+        let subtitles_only_failed = !subtitle_arguments(&job.selection).is_empty() && result_file.is_some();
+        if run.code != Some(0) && !subtitles_only_failed {
             return Err(failure(&run.stderr));
         }
-        let mut result = result_file
-            .filter(|file| file.parent() == Some(work.as_path()) && file.file_name().is_some_and(|n| n.to_string_lossy().starts_with("result.")) && file.exists())
-            .ok_or("The video tool did not produce a completed media file.")?;
+        let mut result = result_file.ok_or("The video tool did not produce a completed media file.")?;
         if job.selection.clip_exact {
             result = match self.exact_cut(&result, &work, job.selection.audio_only, &events, &cancel).await {
                 Err(e) if e.is_empty() => return Ok(Outcome::Paused),
@@ -342,6 +344,7 @@ impl Tools {
         };
         std::fs::rename(&staging, &job.destination).map_err(|e| format!("The finished video could not be saved: {e}"))?;
         // The work folder holds only this download's parts.
+        move_subtitles(&work, &job.destination);
         let _ = std::fs::remove_dir_all(&work);
         let bytes = std::fs::metadata(&job.destination).map(|m| m.len()).unwrap_or(0);
         Ok(Outcome::Completed { path: job.destination.clone(), bytes, sha256 })
@@ -545,6 +548,32 @@ fn format_arguments(selection: &Selection) -> Vec<String> {
     vec!["--format".into(), "bv*+ba/b".into(), "--format-sort".into(), sort]
 }
 
+/// Subtitles (the site's own, or automatic ones when that is all there is) put into the file.
+/// Saved as files beside the video ("Name.en.vtt", which players load on their own): the bundled
+/// FFmpeg has no subtitle support to put them inside. Not for clips, whose timing would not match.
+fn subtitle_arguments(selection: &Selection) -> Vec<String> {
+    match selection.subtitles.as_deref().filter(|l| !selection.audio_only && !selection.is_clip() && formats::valid_languages(l)) {
+        Some(languages) => ["--write-subs", "--write-auto-subs", "--sub-langs", languages, "--ignore-errors"].map(String::from).to_vec(),
+        None => Vec::new(),
+    }
+}
+
+/// `result.en.vtt` in the work folder becomes `<video name>.en.vtt` beside the video.
+fn move_subtitles(work: &Path, video: &Path) {
+    let Ok(entries) = std::fs::read_dir(work) else { return };
+    let stem = video.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let Some(rest) = name.strip_prefix("result.") else { continue };
+        let Some((language, ext)) = rest.rsplit_once('.') else { continue };
+        if !matches!(ext, "vtt" | "srt" | "ass") || !formats::valid_languages(language) {
+            continue;
+        }
+        let target = free_path(&video.with_file_name(format!("{stem}.{language}.{ext}")));
+        let _ = std::fs::rename(entry.path(), target);
+    }
+}
+
 fn seconds(value: f64) -> String {
     let text = format!("{value:.3}");
     text.trim_end_matches('0').trim_end_matches('.').to_string()
@@ -618,6 +647,25 @@ mod tests {
         assert_eq!(format_arguments(&Selection::preset(None, true))[1], "ba[ext=m4a]/ba[acodec^=mp4a]/ba/b");
         let pair = Selection { format_id: "137+140".into(), extension: "m4a".into(), ..Default::default() };
         assert_eq!(format_arguments(&pair), ["--format", "137+140", "--merge-output-format", "mp4"]);
+    }
+
+    #[test]
+    fn subtitles_are_saved_beside_the_video_but_not_for_audio_or_clips() {
+        let with = Selection { subtitles: Some("en,fr".into()), ..Selection::preset(Some(720), false) };
+        assert_eq!(subtitle_arguments(&with)[..4], ["--write-subs", "--write-auto-subs", "--sub-langs", "en,fr"]);
+        assert!(subtitle_arguments(&Selection { subtitles: Some("en".into()), ..Selection::preset(None, true) }).is_empty());
+        assert!(subtitle_arguments(&Selection { clip_start: Some(5.0), ..with.clone() }).is_empty());
+
+        let dir = std::env::temp_dir().join(format!("flux-subs-{}", std::process::id()));
+        let work = dir.join(".flux-video-1");
+        std::fs::create_dir_all(&work).unwrap();
+        for name in ["result.en.vtt", "result.pt-BR.vtt", "result.mp4.part", "result.f137.mp4"] {
+            std::fs::write(work.join(name), b"x").unwrap();
+        }
+        move_subtitles(&work, &dir.join("Talk (720p).mp4"));
+        assert!(dir.join("Talk (720p).en.vtt").exists() && dir.join("Talk (720p).pt-BR.vtt").exists());
+        assert!(work.join("result.f137.mp4").exists(), "only subtitles move");
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]

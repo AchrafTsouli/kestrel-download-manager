@@ -27,6 +27,9 @@
   let chosen: Set<string> = $state(new Set());
   let preset = $state("best");
   let subfolder = $state(true);
+  // Subtitles, in the language Windows uses (saved as files beside the video).
+  let subsOn = $state(false);
+  let subsLangs = $state((navigator.language || "en").split("-")[0].toLowerCase());
 
   async function load() {
     loading = true; error = ""; found = null;
@@ -69,7 +72,10 @@
     return "";
   });
   const selected = $derived(found?.catalog?.formats.find((f) => f.formatId === formatId));
-  const ready = $derived(!busy && !loading && (found?.catalog ? !!selected && !clipError : chosen.size > 0));
+  const audio = $derived(found?.catalog ? !!selected?.audioOnly : preset === "audio");
+  const wantSubs = $derived(subsOn && !audio && !(found?.catalog && clipOn) && subsLangs.trim().length > 0);
+  const subsError = $derived(subsOn && !/^[A-Za-z0-9*._-]+(,[A-Za-z0-9*._-]+)*$/.test(subsLangs.trim()) ? "Write languages like: en, fr, pt-BR." : "");
+  const ready = $derived(!subsError && !busy && !loading && (found?.catalog ? !!selected && !clipError : chosen.size > 0));
 
   function toggle(entry: string) {
     const next = new Set(chosen);
@@ -82,8 +88,8 @@
     busy = true; error = "";
     try {
       const choice = found?.catalog
-        ? { pendingId: id, formatId, clipStart: clipOn ? clipStart ?? 0 : null, clipEnd: clipOn ? clipEnd : null, clipExact: clipOn && exact, start }
-        : { pendingId: id, entries: [...chosen], maxHeight: /^\d+$/.test(preset) ? Number(preset) : null, audioOnly: preset === "audio", subfolder, start };
+        ? { pendingId: id, formatId, clipStart: clipOn ? clipStart ?? 0 : null, clipEnd: clipOn ? clipEnd : null, clipExact: clipOn && exact, subtitles: wantSubs ? subsLangs.trim() : null, start }
+        : { pendingId: id, entries: [...chosen], maxHeight: /^\d+$/.test(preset) ? Number(preset) : null, audioOnly: preset === "audio", subfolder, subtitles: wantSubs ? subsLangs.trim() : null, start };
       await call("confirm_video", { choice });
       win.close();
     } catch (e) { error = String(e); busy = false; }
@@ -91,6 +97,15 @@
   async function asFile() { try { await call("video_as_file", { id }); win.close(); } catch (e) { error = String(e); } }
   async function cancel() { await call("cancel_pending", { id }); win.close(); }
 </script>
+
+{#snippet subtitles()}
+  <div class="row subs">
+    <label class="check" title={audio ? "Audio has no subtitles" : ""}><input type="checkbox" bind:checked={subsOn} disabled={audio} /> Subtitles</label>
+    <input class="input langs" bind:value={subsLangs} disabled={!subsOn || audio} aria-label="Subtitle languages" spellcheck="false" />
+    <span class="muted">{found?.catalog && clipOn && subsOn ? "not with a part of the video" : "saved beside the video, e.g. en, fr"}</span>
+  </div>
+  {#if subsError}<p class="error-text">{subsError}</p>{/if}
+{/snippet}
 
 <div class="win">
   <div class="win-body">
@@ -113,6 +128,7 @@
           </label>
         {/each}
       </div>
+      {@render subtitles()}
       <fieldset class="clip">
         <label class="check"><input type="checkbox" bind:checked={clipOn} /> Download only a part</label>
         {#if clipOn}
@@ -158,6 +174,7 @@
         </select>
       </div>
       <label class="check"><input type="checkbox" bind:checked={subfolder} /> Save in a folder named after the playlist</label>
+      {@render subtitles()}
     {/if}
     {#if error}<p class="error-text">{error}</p>{/if}
   </div>
@@ -190,6 +207,8 @@
   .time { width: 90px; flex: none !important; font-variant-numeric: tabular-nums; }
   .modes { flex-direction: column; align-items: flex-start; gap: 4px; }
   .tools { gap: 6px; }
+  .subs { gap: 8px; }
+  .langs { width: 110px; flex: none !important; }
   .small { min-width: 0; }
   .win-actions .left { flex: 1; }
 </style>

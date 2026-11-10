@@ -33,6 +33,14 @@ pub struct Selection {
     pub clip_exact: bool,
     /// The site refused ordinary requests; yt-dlp imitates Chrome's network signature for it.
     pub impersonate: bool,
+    /// Subtitle languages to put into the file ("en.*,fr"); none = no subtitles.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub subtitles: Option<String>,
+}
+
+/// "en", "fr.*", "pt-BR", "all", separated by commas: nothing a command line could misread.
+pub fn valid_languages(text: &str) -> bool {
+    !text.is_empty() && text.len() <= 64 && text.split(',').all(|l| !l.is_empty() && l.bytes().all(|b| b.is_ascii_alphanumeric() || b"-_.*".contains(&b)) && !l.starts_with('-'))
 }
 
 pub fn valid_format_id(id: &str) -> bool {
@@ -78,6 +86,9 @@ impl Selection {
         };
         if pages::canonicalize(page).is_none() || !format || !EXTENSIONS.contains(&self.extension.as_str()) || self.label.chars().count() > 200 || self.audio_only && self.no_audio {
             return Err("Invalid video format selection.".into());
+        }
+        if self.subtitles.as_deref().is_some_and(|l| !valid_languages(l)) {
+            return Err("Write subtitle languages like: en, fr, pt-BR (or all).".into());
         }
         if self.is_clip() {
             let start = self.clip_start.unwrap_or(0.0);
@@ -411,5 +422,9 @@ mod tests {
         assert!(clip(None, None, true).validate(page).is_err());
         assert!(clip(Some(f64::NAN), None, false).validate(page).is_err());
         assert_eq!(Selection { label: "MP4 · 720p · H.264".into(), ..Default::default() }.quality(), "720p");
+        let subs = |l: &str| Selection { format_id: "18".into(), extension: "mp4".into(), subtitles: Some(l.into()), ..Default::default() };
+        assert!(subs("en.*,fr,pt-BR").validate(page).is_ok());
+        assert!(subs("--exec").validate(page).is_err());
+        assert!(subs("en fr").validate(page).is_err());
     }
 }

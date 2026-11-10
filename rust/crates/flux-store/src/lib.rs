@@ -20,11 +20,25 @@ pub enum Error {
 }
 pub type Result<T> = std::result::Result<T, Error>;
 
-/// `%LOCALAPPDATA%\Flux` on Windows (the app may pass another folder, e.g. for a portable copy).
+fn program_folder() -> Option<PathBuf> {
+    std::env::current_exe().ok().and_then(|p| p.parent().map(Path::to_path_buf))
+}
+
+/// A portable copy: a file named "portable" beside the program.
+pub fn is_portable() -> bool {
+    program_folder().is_some_and(|f| f.join("portable").is_file())
+}
+
+/// Where Flux keeps its data: `FLUX_DATA_DIR` when set (tests, separate profiles), `data` beside a
+/// portable copy, otherwise `%LOCALAPPDATA%\Flux`.
 pub fn default_directory() -> PathBuf {
-    // FLUX_DATA_DIR (an absolute folder) keeps a separate Flux: tests, or a copy on a USB stick.
     if let Some(dir) = std::env::var_os("FLUX_DATA_DIR").map(PathBuf::from).filter(|d| d.is_absolute()) {
         return dir;
+    }
+    if is_portable() {
+        if let Some(folder) = program_folder() {
+            return folder.join("data");
+        }
     }
     std::env::var_os("LOCALAPPDATA").map(PathBuf::from).unwrap_or_else(std::env::temp_dir).join("Flux")
 }

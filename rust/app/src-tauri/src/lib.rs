@@ -289,6 +289,8 @@ struct VideoChoice {
     audio_only: bool,
     #[serde(default)]
     subfolder: bool,
+    /// Subtitle languages ("en,fr"), saved beside the video.
+    subtitles: Option<String>,
     /// "now" or "later"
     start: String,
 }
@@ -301,7 +303,8 @@ async fn confirm_video(app: AppHandle, manager: Mgr<'_>, windows: State<'_, Wind
     let pending = windows.pending.lock().unwrap().get(&choice.pending_id).cloned().ok_or("This download was already added or cancelled.")?;
     let found = pending.video.clone().ok_or("The quality list is not ready yet.")?;
     if let Some(playlist) = found.playlist {
-        let preset = flux_media::Selection::preset(choice.max_height, choice.audio_only);
+        let mut preset = flux_media::Selection::preset(choice.max_height, choice.audio_only);
+        preset.subtitles = choice.subtitles.clone().filter(|_| !choice.audio_only);
         let category = if choice.audio_only { "Music" } else { "Video" };
         let mut folder = manager.folder_for(category);
         if choice.subfolder {
@@ -342,6 +345,7 @@ async fn confirm_video(app: AppHandle, manager: Mgr<'_>, windows: State<'_, Wind
     selection.clip_start = choice.clip_start.filter(|s| *s > 0.0);
     selection.clip_end = choice.clip_end;
     selection.clip_exact = choice.clip_exact && selection.is_clip();
+    selection.subtitles = choice.subtitles.clone().filter(|_| !selection.audio_only && !selection.is_clip());
     selection.validate(&pending.request.url)?;
     let part = if selection.is_clip() { format!(" (part {}-{})", clock_name(selection.clip_start.unwrap_or(0.0)), selection.clip_end.map_or("end".to_string(), clock_name)) } else { String::new() };
     let name = flux_engine::sanitize_file_name(&format!("{}{part} ({}).{}", catalog.title, selection.quality(), selection.extension));
@@ -547,6 +551,24 @@ fn exit_app(app: AppHandle) {
     app.state::<Shared>().shutdown();
     app.exit(0);
 }
+/// Registers this copy's browser bridge for Chrome, Edge and Brave (the installer does it too).
+#[tauri::command]
+async fn register_browsers() -> Result<String, String> {
+    let host = std::env::current_exe().map_err(|e| e.to_string())?.with_file_name("flux-nmhost.exe");
+    if !host.exists() {
+        return Err("flux-nmhost.exe is missing beside Flux.".into());
+    }
+    let mut command = std::process::Command::new(host);
+    command.arg("--register");
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x0800_0000);
+    }
+    let output = command.output().map_err(|e| e.to_string())?;
+    let text = String::from_utf8_lossy(if output.status.success() { &output.stdout } else { &output.stderr }).trim().to_string();
+    if output.status.success() { Ok(text) } else { Err(text) }
+}
 /// Site grabber: links to files of the given types on one site.
 #[tauri::command]
 async fn grab_site(manager: Mgr<'_>, url: String, extensions: String) -> Result<Vec<String>, String> {
@@ -736,7 +758,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             list_downloads, get_download, get_settings, save_settings, offer_url, get_pending, confirm_pending, cancel_pending,
-            probe_video, video_exact_cut, confirm_video, video_as_file, load_torrent, confirm_torrent, open_torrent_file, check_updates, install_update, drag_item, grab_site, run_waiting,
+            probe_video, video_exact_cut, confirm_video, video_as_file, load_torrent, confirm_torrent, open_torrent_file, check_updates, install_update, drag_item, grab_site, run_waiting, register_browsers,
             add_downloads, pause_downloads, resume_downloads, pause_all, resume_all, remove_downloads, remove_completed,
             rename_download, redownload, set_speed_limit, set_queue, enqueue, start_queue, stop_queue, running_queues,
             open_file, show_in_folder, open_folder, show_progress, show_window, power_action, exit_app, app_version

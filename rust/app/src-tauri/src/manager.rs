@@ -82,7 +82,8 @@ impl Manager {
     pub fn open(app: AppHandle, data_dir: &Path) -> Result<Shared, String> {
         let mut store = Store::open(&data_dir.join("history.db")).map_err(|e| e.to_string())?;
         // The first start after Flux 1.x brings its settings and downloads along (once).
-        let fresh = store.get::<Settings>("settings").map_err(|e| e.to_string())?.is_none() && store.get::<bool>("imported-v1").ok().flatten().is_none();
+        // (A portable copy starts empty: the installed 1.x's history belongs to the installed Flux.)
+        let fresh = !flux_store::is_portable() && store.get::<Settings>("settings").map_err(|e| e.to_string())?.is_none() && store.get::<bool>("imported-v1").ok().flatten().is_none();
         if fresh {
             if let Some((settings, records)) = crate::migrate::import(&flux_store::v1_history_path(), &data_dir.join("torrents")) {
                 let list: Vec<(String, Record)> = records.into_iter().map(|r| (r.id.clone(), r)).collect();

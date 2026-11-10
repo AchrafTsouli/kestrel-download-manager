@@ -8,6 +8,7 @@
   let tab = $state("General");
   let error = $state("");
   let limitKb = $state(0);
+  let bridgeNote = $state("");
   const tabs = ["General", "Save to", "Downloads", "Connection", "Site logins", "Rules", "Browser", "Updates"];
   async function pickScanner() {
     const chosen = await pickFolder({ title: "Virus scanner program", filters: [{ name: "Programs", extensions: ["exe", "bat", "cmd"] }] });
@@ -168,6 +169,10 @@
           <textarea id="ext" class="input" rows="4" bind:value={s.captureExtensions} spellcheck="false"></textarea>
           <label class="muted" for="excluded">Never take downloads from these sites (one per line)</label>
           <textarea id="excluded" class="input" rows="3" bind:value={s.excludedSites} spellcheck="false"></textarea>
+          <div class="row">
+            <button class="btn" onclick={async () => { try { error = ""; bridgeNote = await call<string>("register_browsers"); } catch (e) { error = String(e); } }}>Connect browsers</button>
+            <span class="muted">{bridgeNote || "Lets Chrome, Edge and Brave send downloads to this copy of Flux."}</span>
+          </div>
         {:else if tab === "Updates"}
           <h2>Updates</h2>
           <label class="check"><input type="checkbox" bind:checked={s.autoCheckUpdates} /> Check for new versions of Flux every day</label>
