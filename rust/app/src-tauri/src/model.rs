@@ -52,6 +52,9 @@ pub struct Record {
     #[serde(default)]
     pub kind: Kind,
     pub added_ms: u64,
+    /// Its place in its queue (Scheduler > Files in the queue); 0 = in the order it was added.
+    #[serde(default)]
+    pub queue_order: u64,
     #[serde(default)]
     pub last_try_ms: Option<u64>,
     #[serde(default)]
@@ -116,6 +119,7 @@ pub struct View {
     pub segments: Vec<SegmentView>,
     pub resumable: bool,
     pub added_ms: u64,
+    pub queue_order: u64,
     pub last_try_ms: Option<u64>,
     pub completed_ms: Option<u64>,
     pub error: Option<String>,
@@ -169,6 +173,7 @@ impl View {
             segments: record.resume.plan.segments.iter().map(|s| SegmentView { start: s.start, end: s.end, done: s.done }).collect(),
             resumable: record.resume.ranged,
             added_ms: record.added_ms,
+            queue_order: record.queue_key(),
             last_try_ms: record.last_try_ms,
             completed_ms: record.completed_ms,
             error: record.error.clone(),
@@ -207,11 +212,15 @@ pub struct Queue {
     pub days: Vec<u8>,
     pub after: AfterQueue,
     pub retries: u32,
+    /// Start this queue when Kestrel starts.
+    pub start_on_launch: bool,
+    /// A file or program opened when the queue has finished.
+    pub open_when_done: String,
 }
 
 impl Default for Queue {
     fn default() -> Self {
-        Queue { name: MAIN_QUEUE.into(), max_active: 3, schedule_enabled: false, start_time: None, stop_time: None, days: vec![], after: AfterQueue::Nothing, retries: 3 }
+        Queue { name: MAIN_QUEUE.into(), max_active: 3, schedule_enabled: false, start_time: None, stop_time: None, days: vec![], after: AfterQueue::Nothing, retries: 3, start_on_launch: false, open_when_done: String::new() }
     }
 }
 
@@ -501,5 +510,12 @@ mod tests {
     fn scanner_arguments_keep_quoted_parts() {
         assert_eq!(crate::manager::split_arguments(r#"--scan "{file}" /quiet"#).unwrap(), ["--scan", "{file}", "/quiet"]);
         assert!(crate::manager::split_arguments(r#""unclosed"#).is_err());
+    }
+}
+
+impl Record {
+    /// The order inside its queue: a place set in the Scheduler, else the time it was added.
+    pub fn queue_key(&self) -> u64 {
+        if self.queue_order > 0 { self.queue_order } else { self.added_ms }
     }
 }

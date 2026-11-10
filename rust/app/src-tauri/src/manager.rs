@@ -336,6 +336,7 @@ impl Manager {
             status: if start == "later" { Status::Paused } else { Status::Queued },
             kind: match &request.video { Some(selection) => Kind::Video { selection: selection.clone() }, None => Kind::Http },
             added_ms: now_ms(),
+            queue_order: 0,
             last_try_ms: None,
             completed_ms: None,
             total: request.total.or(request.video.as_ref().and_then(|v| v.total_bytes)),
@@ -385,6 +386,7 @@ impl Manager {
             total: Some(selection.selected_bytes).filter(|b| *b > 0),
             kind: Kind::Torrent { selection },
             added_ms: now_ms(),
+            queue_order: 0,
             last_try_ms: None,
             completed_ms: None,
             written: 0,
@@ -417,7 +419,9 @@ impl Manager {
         let queues = self.settings.read().unwrap().queues.clone();
         let running = self.running_queues.lock().unwrap().clone();
         for queue in queues.iter().filter(|q| running.contains(&q.name)) {
-            let waiting: Vec<String> = self.records.lock().unwrap().iter().filter(|r| r.queue == queue.name && r.status == Status::Queued).map(|r| r.id.clone()).collect();
+            let mut waiting: Vec<(u64, String)> = self.records.lock().unwrap().iter().filter(|r| r.queue == queue.name && r.status == Status::Queued).map(|r| (r.queue_key(), r.id.clone())).collect();
+            waiting.sort();
+            let waiting: Vec<String> = waiting.into_iter().map(|(_, id)| id).collect();
             for id in waiting {
                 if self.running_in(&queue.name) >= queue.max_active.max(1) {
                     break;
@@ -868,16 +872,19 @@ impl Manager {
         self.emit(id);
     }
 
-    /// When a scheduled queue has nothing left, run its "after" action once.
+    /// When a started queue has nothing left: its sound, the file to open, then its "after" action.
     fn check_queues_done(self: &Arc<Self>) {
         let settings = self.settings.read().unwrap().clone();
-        for queue in settings.queues.iter().filter(|q| q.after != crate::model::AfterQueue::Nothing) {
+        for queue in settings.queues.iter() {
             let active = self.records.lock().unwrap().iter().any(|r| r.queue == queue.name && (r.status == Status::Queued || r.status.running()));
             let started = self.running_queues.lock().unwrap().contains(&queue.name);
             let had_any = self.records.lock().unwrap().iter().any(|r| r.queue == queue.name && r.status == Status::Completed);
             if started && !active && had_any {
                 self.running_queues.lock().unwrap().remove(&queue.name);
                 if let Some(sound) = settings.sounds.get(3).filter(|s| s.on) { crate::system::play(&sound.file, true); }
+                if !queue.open_when_done.trim().is_empty() {
+                    let _ = crate::system::open_path(std::path::Path::new(queue.open_when_done.trim()));
+                }
                 let _ = self.app.emit("queue-finished", (queue.name.clone(), queue.after));
             }
         }
@@ -935,6 +942,31 @@ impl Manager {
     pub fn run_waiting(self: &Arc<Self>, name: &str) {
         self.running_queues.lock().unwrap().insert(name.to_string());
         self.schedule();
+    }
+    /// Scheduler > Files in the queue: moves a download up (-1) or down (+1) among its queue's files.
+    pub fn move_in_queue(self: &Arc<Self>, id: &str, delta: i32) {
+        let changed: Vec<String> = {
+            let mut records = self.records.lock().unwrap();
+            let Some(queue) = records.iter().find(|r| r.id == id).map(|r| r.queue.clone()) else { return };
+            let mut order: Vec<(u64, String)> = records.iter().filter(|r| r.queue == queue && r.status != Status::Completed).map(|r| (r.queue_key(), r.id.clone())).collect();
+            order.sort();
+            let Some(at) = order.iter().position(|(_, i)| i == id) else { return };
+            let to = at as i64 + delta as i64;
+            if to < 0 || to >= order.len() as i64 {
+                return;
+            }
+            order.swap(at, to as usize);
+            for (place, (_, rid)) in order.iter().enumerate() {
+                if let Some(r) = records.iter_mut().find(|r| &r.id == rid) {
+                    r.queue_order = place as u64 + 1;
+                }
+            }
+            order.into_iter().map(|(_, i)| i).collect()
+        };
+        for id in &changed {
+            self.save(id);
+            self.emit(id);
+        }
     }
     pub fn stop_queue(self: &Arc<Self>, name: &str) {
         self.running_queues.lock().unwrap().remove(name);

@@ -90,7 +90,8 @@
               <div class="line"><span class="muted label">Transfer rate</span><b>{d.bytesPerSecond > 0 ? size(d.bytesPerSecond) + "/sec" : "0 KB/sec"}</b></div>
               <label class="check"><input type="checkbox" bind:checked={limitOn} onchange={applyLimit} /> Use Speed Limiter</label>
               <div class="line indent"><span class="muted">Maximum download speed:</span><input class="input num" type="number" min="1" bind:value={limitKb} disabled={!limitOn} onchange={applyLimit} aria-label="Maximum speed in KB/s" /><span class="muted">KBytes/sec</span></div>
-              <p class="hint">The limit stays with this file when it is paused and resumed.</p>
+              <label class="check"><input type="checkbox" checked disabled /> Remember Speed Limiter settings for this file on download stop/resume</label>
+              <div class="line end"><button class="btn" onclick={() => (tab = "status")}>Hide tab</button></div>
             </div>
           {:else}
             <div class="pane">
@@ -104,12 +105,13 @@
                 </select>
               </div>
               <label class="check"><input type="checkbox" bind:checked={exitWhenDone} disabled={showComplete} onchange={() => { if (exitWhenDone) turnOff = false; applyAfter(); }} /> Exit Kestrel when done</label>
+              <div class="line end"><button class="btn" onclick={() => (tab = "status")}>Hide tab</button></div>
             </div>
           {/if}
         </div>
       </div>
 
-      <div class="track" aria-label="Progress"><i style:width="{percent(d)}%"></i></div>
+      <div class="track main" aria-label="Progress"><i style:width="{percent(d)}%"></i></div>
       {#if d.phase}
         <div class="phase"><span>{d.phase}…</span>{#if d.phaseFraction != null}<span class="muted">{Math.round(d.phaseFraction * 100)}%</span>{/if}</div>
         <div class="track thin" class:busy={d.phaseFraction == null} aria-label={d.phase}><i style:width="{(d.phaseFraction ?? 1) * 100}%"></i></div>
@@ -119,7 +121,7 @@
       <div class="actions">
         <button class="btn" onclick={() => (details = !details)}>{details ? "<< Hide details" : "Show details >>"}</button>
         <div class="grow"></div>
-        <button class="btn" onclick={toggle} disabled={d.status === "Completed"}>{running(d.status) || d.status === "Queued" ? "Pause" : resumable(d.status) ? "Resume" : "Pause"}</button>
+        <button class="btn" onclick={toggle} disabled={d.status === "Completed"}>{running(d.status) || d.status === "Queued" ? "Pause" : resumable(d.status) ? "Start" : "Pause"}</button>
         <button class="btn" onclick={cancel}>{running(d.status) ? "Cancel" : "Close"}</button>
       </div>
 
@@ -131,7 +133,7 @@
         <div class="conns">
           <div class="conn head"><span>N.</span><span>Downloaded</span><span>Info</span></div>
           {#each d.segments as s, i}
-            <div class="conn"><span>{i + 1}</span><span>{size(s.done, "0 B")}</span><span class="muted">{s.end != null && s.done >= s.end - s.start + 1 ? "Complete" : running(d.status) ? "Receiving data…" : "Waiting"}</span></div>
+            <div class="conn"><span>{i + 1}</span><span>{size(s.done, "0 B")}</span><span class="muted">{s.end != null && s.done >= s.end - s.start + 1 ? "Complete" : running(d.status) ? "Receiving data…" : "Disconnected"}</span></div>
           {/each}
         </div>
         <div class="muted bytes">{exact(d.written)}</div>
@@ -174,6 +176,11 @@
   .hint { margin: 0; color: var(--muted); font-size: 11px; }
   .path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .track { height: 16px; }
+  /* Like IDM: a plain green bar for the file. */
+  .track.main { height: 20px; border-radius: 2px; }
+  .track.main i { background: linear-gradient(180deg, #2fbf5f, #178a3e); }
+  .line.end { justify-content: flex-end; margin-top: auto; }
+  .pane { min-height: 148px; }
   .track.thin { height: 6px; }
   .track.busy i { opacity: 0.45; animation: pulse 1.2s ease-in-out infinite alternate; }
   @keyframes pulse { to { opacity: 0.9; } }

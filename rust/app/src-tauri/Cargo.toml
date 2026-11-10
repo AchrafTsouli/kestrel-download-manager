@@ -28,6 +28,7 @@ tokio-util.workspace = true
 url.workspace = true
 regex.workspace = true
 base64 = "0.22"
+reqwest.workspace = true
 zip = { version = "2", default-features = false, features = ["deflate"] }
 flux-engine.workspace = true
 flux-store.workspace = true

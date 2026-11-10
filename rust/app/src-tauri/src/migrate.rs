@@ -111,6 +111,8 @@ pub fn settings(v1: &Value) -> Settings {
                 days: q.get("Weekdays").and_then(Value::as_array).map(|d| d.iter().filter_map(|x| x.as_u64().filter(|n| *n < 7).map(|n| n as u8)).collect()).unwrap_or_default(),
                 after: if flag(q, "ExitWhenDone", false) { AfterQueue::Exit } else { AfterQueue::Nothing },
                 retries: number(q, "Retries").map_or(3, |n| n.min(20) as u32),
+                start_on_launch: false,
+                open_when_done: String::new(),
             })
             .collect();
         list.dedup_by(|a, b| a.name == b.name);
@@ -154,6 +156,7 @@ pub fn record(job: &Value, torrent_cache: &Path) -> Option<Record> {
         status,
         kind,
         added_ms: millis(job, "CreatedAt").unwrap_or_else(crate::manager::now_ms),
+        queue_order: 0,
         last_try_ms: millis(job, "StartedAt"),
         completed_ms: millis(job, "CompletedAt"),
         total,

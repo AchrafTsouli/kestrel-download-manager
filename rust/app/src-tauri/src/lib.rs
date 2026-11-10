@@ -13,6 +13,7 @@ mod model;
 mod system;
 mod torrents;
 mod updates;
+mod zippreview;
 
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -210,12 +211,34 @@ fn save_settings(app: AppHandle, manager: Mgr, settings: Settings) -> Result<(),
     Ok(())
 }
 #[tauri::command]
-async fn offer_url(app: AppHandle, url: String, file_name: Option<String>) -> Result<Option<String>, String> {
+async fn offer_url(app: AppHandle, url: String, file_name: Option<String>, login: Option<String>, password: Option<String>) -> Result<Option<String>, String> {
     let url = url.trim().to_string();
     if !(url.starts_with("http://") || url.starts_with("https://") || flux_torrent::magnet_hash(&url).is_some()) {
         return Err("Enter a full address starting with http:// or https://, or a magnet link.".into());
     }
-    offer(&app, PendingRequest { url, file_name, ..Default::default() }, false)
+    // "Use authorization": the login goes with this download only, as HTTP Basic authentication.
+    let session = match login.filter(|l| !l.is_empty()) {
+        Some(login) => {
+            use base64::Engine;
+            let parsed = url::Url::parse(&url).map_err(|e| e.to_string())?;
+            let mut session = flux_engine::Session::for_url(&parsed);
+            let token = base64::engine::general_purpose::STANDARD.encode(format!("{login}:{}", password.unwrap_or_default()));
+            session.authorization = Some(format!("Basic {token}"));
+            Some(session)
+        }
+        None => None,
+    };
+    offer(&app, PendingRequest { url, file_name, session, ..Default::default() }, false)
+}
+/// The start dialog's "Preview": the files inside a .zip that is still on the server.
+#[tauri::command]
+async fn zip_preview(windows: State<'_, Windows>, id: String) -> Result<Vec<zippreview::Entry>, String> {
+    let request = windows.pending.lock().unwrap().get(&id).map(|p| p.request.clone()).ok_or("This download was already added or cancelled.")?;
+    zippreview::list(&request.url, request.session.as_ref()).await
+}
+#[tauri::command]
+fn move_in_queue(manager: Mgr, id: String, delta: i32) {
+    manager.move_in_queue(&id, delta)
 }
 #[tauri::command]
 fn get_pending(windows: State<'_, Windows>, id: String) -> Option<Pending> {
@@ -572,7 +595,7 @@ async fn show_progress(app: AppHandle, id: String) -> Result<(), String> {
 async fn show_window(app: AppHandle, name: String) -> Result<(), String> {
     match name.as_str() {
         "options" => open_window(&app, "options", "Options", 720.0, 600.0, true),
-        "scheduler" => open_window(&app, "scheduler", "Scheduler", 680.0, 500.0, true),
+        "scheduler" => open_window(&app, "scheduler", "Scheduler", 700.0, 580.0, true),
         "batch" => open_window(&app, "batch", "Add batch download", 560.0, 420.0, true),
         "grabber" => open_window(&app, "grabber", "Site grabber", 640.0, 540.0, true),
         _ => show_main(&app),
@@ -880,7 +903,7 @@ fn tray(app: &AppHandle) -> tauri::Result<()> {
             "show" => show_main(app),
             "add" => { show_main(app); let _ = app.emit("open-add", ()); }
             "batch" => open_window(app, "batch", "Add batch download", 560.0, 420.0, true),
-            "scheduler" => open_window(app, "scheduler", "Scheduler", 680.0, 500.0, true),
+            "scheduler" => open_window(app, "scheduler", "Scheduler", 700.0, 580.0, true),
             "options" => open_window(app, "options", "Options", 720.0, 600.0, true),
             "limit-on" => set_limiter(app, true),
             "limit-off" => set_limiter(app, false),
@@ -929,6 +952,10 @@ pub fn run() {
             let data_dir = flux_store::default_directory();
             let manager = Manager::open(handle.clone(), &data_dir).map_err(Box::<dyn std::error::Error>::from)?;
             app.manage(manager.clone());
+            // Scheduler: "Start download on Kestrel startup".
+            for queue in manager.settings().queues.iter().filter(|q| q.start_on_launch) {
+                manager.start_queue(&queue.name);
+            }
             // Learned per-site connection limits are kept with the settings.
             let saver = manager.clone();
             handle.listen("host-limit", move |_| { let _ = saver.save_settings(saver.settings()); });
@@ -987,7 +1014,7 @@ pub fn run() {
             list_downloads, get_download, get_settings, save_settings, offer_url, get_pending, confirm_pending, cancel_pending,
             probe_video, video_exact_cut, confirm_video, video_as_file, load_torrent, confirm_torrent, open_torrent_file, check_updates, install_update, drag_item, grab_site, run_waiting, register_browsers, test_browsers, set_after_complete, get_after_complete, open_with, to_background, crash_reports, dismiss_crash, report_crash,
             add_downloads, pause_downloads, resume_downloads, pause_all, resume_all, remove_downloads, remove_completed,
-            rename_download, redownload, write_link_list, read_link_list, set_speed_limit, set_queue, enqueue, start_queue, stop_queue, running_queues,
+            rename_download, redownload, zip_preview, move_in_queue, write_link_list, read_link_list, set_speed_limit, set_queue, enqueue, start_queue, stop_queue, running_queues,
             open_file, show_in_folder, open_folder, show_progress, show_window, power_action, exit_app, app_version
         ])
         .run(tauri::generate_context!())

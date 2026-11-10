@@ -18,6 +18,9 @@
   let queueMenu = $state(false);
   let adding = $state(false);
   let address = $state("");
+  let useAuth = $state(false);
+  let login = $state("");
+  let password = $state("");
   let addError = $state("");
   let confirmDelete: string[] | null = $state(null);
   let deleteFiles = $state(false);
@@ -50,6 +53,7 @@
   let message = $state("Ready.");
 
   const queues = $derived(settings?.queues ?? []);
+  const recentAddresses = $derived([...new Set([...downloads].sort((a, b) => b.addedMs - a.addedMs).map((d) => d.url))].slice(0, 20));
   function inView(d: Download, key: string) {
     if (key === "all") return true;
     if (key === "unfinished") return d.status !== "Completed";
@@ -132,7 +136,7 @@
   const activate = (d: Download) => d.status === "Completed" ? openFile(d) : call("show_progress", { id: d.id });
 
   function openAdd() {
-    adding = true; addError = ""; address = ""; menu = null;
+    adding = true; addError = ""; address = ""; useAuth = false; login = ""; password = ""; menu = null;
     navigator.clipboard?.readText?.().then((t) => {
       t = t.trim();
       if (!/^(https?:\/\/|magnet:\?)\S+$/i.test(t) || address) return;
@@ -145,7 +149,7 @@
     const url = address.trim();
     const existing = downloads.find((d) => d.url === url);
     if (existing && existing.status !== "Failed") { addError = `This address is already in the list as ${existing.name}.`; selected = new Set([existing.id]); return; }
-    try { await call("offer_url", { url }); adding = false; } catch (error) { addError = String(error); }
+    try { await call("offer_url", { url, login: useAuth ? login : null, password: useAuth ? password : null }); adding = false; } catch (error) { addError = String(error); }
   }
   async function openTorrentFile() {
     menu = null;
@@ -471,18 +475,28 @@
 
 {#if adding}
   <div class="scrim" role="presentation" onmousedown={(e) => e.target === e.currentTarget && (adding = false)}>
-    <form class="dialog" onsubmit={add} aria-labelledby="add-title">
+    <form class="dialog add-dialog" onsubmit={add} aria-labelledby="add-title">
       <div class="dialog-title" id="add-title">Enter new address to download</div>
-      <div class="dialog-body">
-        <div class="field"><label for="address">Address</label>
-          <!-- svelte-ignore a11y_autofocus -->
-          <input id="address" bind:value={address} autofocus autocomplete="off" spellcheck="false" placeholder="https://… or magnet:?…" />
+      <div class="add-grid">
+        <div class="add-fields">
+          <div class="field"><label for="address">Address</label>
+            <!-- svelte-ignore a11y_autofocus -->
+            <input id="address" bind:value={address} list="recent-addresses" autofocus autocomplete="off" spellcheck="false" placeholder="https://… or magnet:?…" />
+            <datalist id="recent-addresses">{#each recentAddresses as a}<option value={a}></option>{/each}</datalist>
+          </div>
+          <fieldset class="auth">
+            <legend><label class="checkbox"><input type="checkbox" bind:checked={useAuth} /> Use authorization</label></legend>
+            <div class="auth-row">
+              <label for="login" class:off={!useAuth}>Login</label><input id="login" bind:value={login} disabled={!useAuth} autocomplete="off" spellcheck="false" />
+              <label for="password" class:off={!useAuth}>Password</label><input id="password" type="password" bind:value={password} disabled={!useAuth} autocomplete="off" />
+            </div>
+          </fieldset>
+          {#if addError}<p class="error" role="alert">{addError}</p>{/if}
         </div>
-        {#if addError}<p class="error" role="alert">{addError}</p>{/if}
-      </div>
-      <div class="dialog-actions">
-        <button type="submit" class="btn primary" disabled={!address.trim()}>OK</button>
-        <button type="button" class="btn" onclick={() => (adding = false)}>Cancel</button>
+        <div class="add-buttons">
+          <button type="submit" class="btn primary" disabled={!address.trim()}>OK</button>
+          <button type="button" class="btn" onclick={() => (adding = false)}>Cancel</button>
+        </div>
       </div>
     </form>
   </div>
@@ -660,6 +674,17 @@
   .scrim { position: fixed; inset: 0; z-index: 40; display: grid; place-items: center; background: rgb(0 0 0 / 0.35); }
   .dialog { width: min(540px, 92vw); background: var(--surface); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 18px 50px rgb(0 0 0 / 0.45); overflow: hidden; }
   .dialog.small { width: min(420px, 92vw); }
+  .add-dialog { width: min(600px, 94vw); }
+  .add-grid { display: grid; grid-template-columns: 1fr auto; gap: 14px; padding: 14px; }
+  .add-fields { display: grid; gap: 10px; min-width: 0; }
+  .add-buttons { display: flex; flex-direction: column; gap: 8px; }
+  .auth { margin: 0; padding: 4px 10px 10px; border: 1px solid var(--line); border-radius: 4px; }
+  .auth legend { padding: 0 4px; }
+  .auth-row { display: grid; grid-template-columns: auto 1fr auto 1fr; align-items: center; gap: 8px; }
+  .auth-row label { color: var(--muted); }
+  .auth-row label.off { opacity: 0.5; }
+  .auth-row input { min-width: 0; height: 26px; padding: 0 8px; border: 1px solid var(--line); border-radius: 4px; background: var(--bg); color: var(--text); font: inherit; }
+  .auth-row input:disabled { opacity: 0.5; }
   .dialog-title { padding: 10px 14px; font-weight: 600; background: var(--chrome); border-bottom: 1px solid var(--line); }
   .dialog-body { padding: 14px; display: grid; gap: 10px; }
   .dialog-body p { margin: 0; }

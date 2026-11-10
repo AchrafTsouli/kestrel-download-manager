@@ -19,12 +19,12 @@ export type Status = "Queued" | "Connecting" | "Downloading" | "Retrying" | "Fin
 export type Download = {
   id: string; name: string; url: string; path: string; folder: string; category: string; description: string; queue: string;
   status: Status; kind: "file" | "video" | "torrent"; written: number; total: number | null; bytesPerSecond: number; connections: number;
-  segments: { start: number; end: number | null; done: number }[]; resumable: boolean; addedMs: number; lastTryMs: number | null;
+  segments: { start: number; end: number | null; done: number }[]; resumable: boolean; addedMs: number; queueOrder: number; lastTryMs: number | null;
   completedMs: number | null; error: string | null; note: string | null; phase: string | null; phaseFraction: number | null;
   estimated: boolean; exists: boolean; speedLimit: number;
 };
 export type AfterQueue = "nothing" | "exit" | "sleep" | "hibernate" | "shutdown";
-export type Queue = { name: string; maxActive: number; scheduleEnabled: boolean; startTime: string | null; stopTime: string | null; days: number[]; after: AfterQueue; retries: number };
+export type Queue = { name: string; maxActive: number; scheduleEnabled: boolean; startTime: string | null; stopTime: string | null; days: number[]; after: AfterQueue; retries: number; startOnLaunch: boolean; openWhenDone: string };
 export type Settings = {
   downloadDir: string; categoryFolders: boolean; connections: number; speedLimit: number; lastSpeedLimit: number; showStartDialog: boolean; showProgressWindow: boolean;
   showCompleteDialog: boolean; theme: string; language: string; minimizeToTray: boolean; startWithWindows: boolean; monitorClipboard: boolean;
