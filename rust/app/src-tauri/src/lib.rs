@@ -78,6 +78,8 @@ fn open_window(app: &AppHandle, label: &str, title: &str, width: f64, height: f6
         .inner_size(width, height)
         .min_inner_size(width.min(360.0), height.min(200.0))
         .resizable(resizable)
+        // The progress window draws its own title bar (with the "send to background" arrow).
+        .decorations(!label.starts_with("progress-"))
         .center()
         .focused(true)
         .build();
@@ -87,6 +89,8 @@ fn open_window(app: &AppHandle, label: &str, title: &str, width: f64, height: f6
 }
 
 pub fn open_progress(app: &AppHandle, id: &str) {
+    // Its window is back: it is no longer a background download.
+    app.state::<tray_state::Background>().remove(id);
     open_window(app, &format!("progress-{id}"), "Download progress", 620.0, 520.0, true);
 }
 pub fn open_complete(app: &AppHandle, id: &str) {
@@ -627,6 +631,11 @@ fn report_crash(id: String) -> Result<(), String> {
     system::open_path(std::path::Path::new(&url))?;
     crash::dismiss(&id)
 }
+/// The progress window's green arrow: the download goes on in the background, in the tray.
+#[tauri::command]
+async fn to_background(app: AppHandle, id: String) {
+    tray_state::send(&app, &id);
+}
 #[tauri::command]
 fn set_after_complete(windows: State<'_, Windows>, id: String, action: AfterQueue) {
     let mut after = windows.after.lock().unwrap();
@@ -768,6 +777,7 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_drag::init())
         .manage(Windows::default())
+        .manage(tray_state::Background::default())
         .setup(|app| {
             let handle = app.handle().clone();
             crash::install(app.package_info().version.to_string());
@@ -832,7 +842,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             list_downloads, get_download, get_settings, save_settings, offer_url, get_pending, confirm_pending, cancel_pending,
-            probe_video, video_exact_cut, confirm_video, video_as_file, load_torrent, confirm_torrent, open_torrent_file, check_updates, install_update, drag_item, grab_site, run_waiting, register_browsers, set_after_complete, get_after_complete, open_with, crash_reports, dismiss_crash, report_crash,
+            probe_video, video_exact_cut, confirm_video, video_as_file, load_torrent, confirm_torrent, open_torrent_file, check_updates, install_update, drag_item, grab_site, run_waiting, register_browsers, set_after_complete, get_after_complete, open_with, to_background, crash_reports, dismiss_crash, report_crash,
             add_downloads, pause_downloads, resume_downloads, pause_all, resume_all, remove_downloads, remove_completed,
             rename_download, redownload, set_speed_limit, set_queue, enqueue, start_queue, stop_queue, running_queues,
             open_file, show_in_folder, open_folder, show_progress, show_window, power_action, exit_app, app_version

@@ -53,3 +53,11 @@ debug = "line-tables-only"
 
 [profile.dev.package."*"]
 debug = false
+
+# Quick test builds (scripts/Build-Test.ps1): optimized, but without the whole-program link pass
+# that makes release builds slow. Installers still use the release profile.
+[profile.fast]
+inherits = "release"
+lto = false
+codegen-units = 16
+incremental = true
