@@ -6,11 +6,17 @@ import { downloadSession, installHeaderCapture } from "./session.js";
 installHeaderCapture(chrome);
 
 const recovery = recoverHandoffs(chrome).catch(console.error);
-chrome.downloads.onDeterminingFilename.addListener((item, suggest) => {
-  // Unlike onCreated, this event includes the server/browser's suggested filename.
-  recovery.then(async () => { await refreshPolicy(); const { capturePolicy = {} } = await chrome.storage.local.get("capturePolicy"); if (shouldCapture(item.url || item.finalUrl, item.filename, capturePolicy)) await captureDownload(chrome, item); }).catch(console.error).finally(() => suggest());
-  return true;
-});
+const captureIfWanted = item => recovery.then(async () => { await refreshPolicy(); const { capturePolicy = {} } = await chrome.storage.local.get("capturePolicy"); if (shouldCapture(item.url || item.finalUrl, item.filename, capturePolicy)) await captureDownload(chrome, item); });
+if (chrome.downloads.onDeterminingFilename) {
+  // Chromium: unlike onCreated, this event includes the server/browser's suggested filename.
+  chrome.downloads.onDeterminingFilename.addListener((item, suggest) => {
+    captureIfWanted(item).catch(console.error).finally(() => suggest());
+    return true;
+  });
+} else {
+  // Firefox has no onDeterminingFilename; onCreated already carries the target file name.
+  chrome.downloads.onCreated.addListener(item => { captureIfWanted(item).catch(console.error); });
+}
 
 chrome.runtime.onMessage.addListener((message, sender, reply) => {
   if (sender.id !== chrome.runtime.id || !sender.tab) return;

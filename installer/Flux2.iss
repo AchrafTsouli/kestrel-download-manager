@@ -99,6 +99,8 @@ Root: HKCU64; Subkey: "Software\Microsoft\Edge\NativeMessagingHosts\com.swiftfet
 Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "ApexDownloader"; ValueData: """{app}\Flux.exe"" --background"; Tasks: startup
 
 [Run]
+; Firefox finds the bridge through its own manifest and key (Chromium ones are written above).
+Filename: "{app}\flux-nmhost.exe"; Parameters: "--register-firefox"; Flags: runhidden; Tasks: browserintegration
 Filename: "{app}\Flux.exe"; Description: "{cm:LaunchApp}"; Flags: nowait postinstall skipifsilent
 ; In-app updates run silently; relaunch the updated app afterwards.
 Filename: "{app}\Flux.exe"; Flags: nowait; Check: WizardSilent
@@ -106,6 +108,7 @@ Filename: "{app}\Browser-Setup.html"; Description: "{cm:BrowserGuide}"; Flags: s
 
 [UninstallDelete]
 Type: files; Name: "{app}\com.swiftfetch.bridge.json"
+Type: files; Name: "{app}\com.swiftfetch.bridge.firefox.json"
 
 [Code]
 function JsonString(Value: String): String;
@@ -179,6 +182,9 @@ var
   Existing: String;
 begin
   if CurUninstallStep = usUninstall then begin
+    if RegQueryStringValue(HKCU, 'Software\Mozilla\NativeMessagingHosts\com.swiftfetch.bridge', '', Existing) and
+       (CompareText(Existing, ExpandConstant('{app}\com.swiftfetch.bridge.firefox.json')) = 0) then
+      RegDeleteKeyIncludingSubkeys(HKCU, 'Software\Mozilla\NativeMessagingHosts\com.swiftfetch.bridge');
     RemoveOwnedBridge(HKCU32, 'Software\Google\Chrome');
     RemoveOwnedBridge(HKCU64, 'Software\Google\Chrome');
     RemoveOwnedBridge(HKCU32, 'Software\BraveSoftware\Brave-Browser');

@@ -2,8 +2,9 @@
 //! it checks the caller, answers what it can itself (connection test, capture rules) and hands the
 //! rest to the running Flux over the per-user pipe, starting Flux in the tray when needed.
 //!
-//! `flux-nmhost --register [extension-id …]` writes the host manifest and registers it for Chrome,
-//! Edge and Brave (current user); `--unregister` removes that. The installer does the same.
+//! `flux-nmhost --register [extension-id …]` writes the host manifests and registers them for
+//! Chrome, Edge, Brave and Firefox (current user); `--register-firefox` does Firefox only (the
+//! installer writes the Chromium one itself); `--unregister` removes them.
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "console")]
 
@@ -13,12 +14,18 @@ use std::time::Duration;
 use flux_ipc::{CapturePolicy, HOST_NAME, Request, Response, read_frame, write_frame};
 
 const BROWSERS: &[&str] = &[r"Software\Google\Chrome", r"Software\Microsoft\Edge", r"Software\BraveSoftware\Brave-Browser"];
+/// Flux's add-on ID in Firefox (browser_specific_settings.gecko.id of the Firefox build).
+const FIREFOX_ID: &str = "flux@achraftsouli.github.io";
+const FIREFOX_KEY: &str = r"HKCU\Software\Mozilla\NativeMessagingHosts";
 
 fn here() -> PathBuf {
     std::env::current_exe().ok().and_then(|p| p.parent().map(Path::to_path_buf)).unwrap_or_default()
 }
 fn manifest_path() -> PathBuf {
     here().join(format!("{HOST_NAME}.json"))
+}
+fn firefox_manifest_path() -> PathBuf {
+    here().join(format!("{HOST_NAME}.firefox.json"))
 }
 fn app_path() -> PathBuf {
     let dir = here();
@@ -42,11 +49,40 @@ fn base64(text: &str) -> Option<Vec<u8>> {
     Some(out)
 }
 
-fn allowed_origins() -> Vec<String> {
-    std::fs::read_to_string(manifest_path()).ok()
+fn manifest_list(path: &Path, field: &str) -> Vec<String> {
+    std::fs::read_to_string(path).ok()
         .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
-        .and_then(|m| m["allowed_origins"].as_array().map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect()))
+        .and_then(|m| m[field].as_array().map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect()))
         .unwrap_or_default()
+}
+
+/// Chromium browsers pass the caller's origin first; Firefox passes its manifest's path, then the
+/// add-on's ID. Only Flux's own extension, as registered, is served.
+fn caller_allowed(args: &[String]) -> bool {
+    match args.first() {
+        Some(origin) if origin.starts_with("chrome-extension://") => manifest_list(&manifest_path(), "allowed_origins").contains(origin),
+        Some(_) => args.get(1).is_some_and(|id| manifest_list(&firefox_manifest_path(), "allowed_extensions").contains(id)),
+        None => false,
+    }
+}
+
+fn reg_set(key: &str, value: &Path) -> bool {
+    std::process::Command::new("reg").args(["add", key, "/ve", "/t", "REG_SZ", "/d", &value.display().to_string(), "/f"]).output().is_ok_and(|o| o.status.success())
+}
+
+fn register_firefox() -> Result<(), String> {
+    let manifest = serde_json::json!({
+        "name": HOST_NAME,
+        "description": "Flux browser bridge",
+        "path": std::env::current_exe().map_err(|e| e.to_string())?.display().to_string(),
+        "type": "stdio",
+        "allowed_extensions": [FIREFOX_ID],
+    });
+    std::fs::write(firefox_manifest_path(), serde_json::to_string_pretty(&manifest).unwrap()).map_err(|e| e.to_string())?;
+    if !reg_set(&format!(r"{FIREFOX_KEY}\{HOST_NAME}"), &firefox_manifest_path()) {
+        return Err("Could not register for Firefox.".into());
+    }
+    Ok(())
 }
 
 fn register(ids: &[String]) -> Result<(), String> {
@@ -72,13 +108,12 @@ fn register(ids: &[String]) -> Result<(), String> {
     });
     std::fs::write(manifest_path(), serde_json::to_string_pretty(&manifest).unwrap()).map_err(|e| e.to_string())?;
     for browser in BROWSERS {
-        let key = format!(r"HKCU\{browser}\NativeMessagingHosts\{HOST_NAME}");
-        let status = std::process::Command::new("reg").args(["add", &key, "/ve", "/t", "REG_SZ", "/d", &manifest_path().display().to_string(), "/f"]).output();
-        if !status.is_ok_and(|o| o.status.success()) {
+        if !reg_set(&format!(r"HKCU\{browser}\NativeMessagingHosts\{HOST_NAME}"), &manifest_path()) {
             return Err(format!("Could not register for {browser}."));
         }
     }
-    println!("Registered {HOST_NAME} for Chrome, Edge and Brave: {}", ids.join(", "));
+    register_firefox()?;
+    println!("Registered {HOST_NAME} for Chrome, Edge, Brave ({}) and Firefox ({FIREFOX_ID}).", ids.join(", "));
     Ok(())
 }
 
@@ -86,7 +121,9 @@ fn unregister() {
     for browser in BROWSERS {
         let _ = std::process::Command::new("reg").args(["delete", &format!(r"HKCU\{browser}\NativeMessagingHosts\{HOST_NAME}"), "/f"]).output();
     }
+    let _ = std::process::Command::new("reg").args(["delete", &format!(r"{FIREFOX_KEY}\{HOST_NAME}"), "/f"]).output();
     let _ = std::fs::remove_file(manifest_path());
+    let _ = std::fs::remove_file(firefox_manifest_path());
     println!("Unregistered {HOST_NAME}.");
 }
 
@@ -150,13 +187,12 @@ async fn main() {
     match args.first().map(String::as_str) {
         Some("--register") => { if let Err(e) = register(&args[1..]) { eprintln!("{e}"); std::process::exit(1) } return; }
         Some("--unregister") => { unregister(); return; }
+        Some("--register-firefox") => { if let Err(e) = register_firefox() { eprintln!("{e}"); std::process::exit(1) } return; }
         _ => {}
     }
     let mut stdin = tokio::io::stdin();
     let mut stdout = tokio::io::stdout();
-    // Chrome passes the calling extension's origin first; only Flux's own extension is served.
-    let origin = args.first().cloned().unwrap_or_default();
-    let response = if !allowed_origins().contains(&origin) {
+    let response = if !caller_allowed(&args) {
         Response::error("This extension is not registered for Flux.")
     } else {
         match tokio::time::timeout(Duration::from_secs(10), read_frame::<Request>(&mut stdin)).await {
