@@ -1,6 +1,7 @@
 //! Keeps a newer yt-dlp beside the user's data (sites change often; the bundled copy ages). The
-//! bundled tools are never modified; a copy is used only after its SHA-256 matches the release's
-//! published checksums and it runs and reports the version it claims. Same rules as 1.x.
+//! bundled tools are never modified. A new copy is used only when the release's checksum list is
+//! signed by yt-dlp's own release key (pinned here), its SHA-256 matches that list, and it runs and
+//! reports the version it claims. The previous copy is kept for rollback.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -8,6 +9,18 @@ use std::time::Duration;
 use sha2::{Digest, Sha256};
 
 pub const REPOSITORY: &str = "https://github.com/yt-dlp/yt-dlp/releases";
+
+/// yt-dlp's release signing key (public.key in the yt-dlp repository).
+const RELEASE_KEY: &str = include_str!("yt-dlp-public.key");
+
+/// Checks that `signature` (SHA2-256SUMS.sig) is yt-dlp's release key signing `data`.
+pub fn verify_release_signature(data: &[u8], signature: &[u8]) -> Result<(), String> {
+    use pgp::composed::{Deserializable, DetachedSignature, SignedPublicKey};
+    let (key, _) = SignedPublicKey::from_string(RELEASE_KEY).map_err(|e| format!("yt-dlp's key is not readable: {e}"))?;
+    let signature = DetachedSignature::from_bytes(signature).map_err(|_| "yt-dlp's signature is not readable.".to_string())?;
+    let valid = signature.verify(&key, data).is_ok() || key.public_subkeys.iter().any(|sub| signature.verify(sub, data).is_ok());
+    if valid { Ok(()) } else { Err("The yt-dlp release is not signed by yt-dlp's release key. The update was refused.".into()) }
+}
 
 /// A yt-dlp version ("2026.08.19" or "2026.08.19.1") as comparable numbers.
 pub fn parse_version(text: &str) -> Option<(u32, u32, u32, u32)> {
@@ -62,7 +75,10 @@ pub async fn update(tools: &Path, update_dir: &Path) -> Result<Option<String>, S
     if current.is_some_and(|c| latest <= c) {
         return Ok(None);
     }
-    let sums = String::from_utf8_lossy(&read(&client, &format!("{REPOSITORY}/download/{tag}/SHA2-256SUMS"), 64 * 1024).await?).into_owned();
+    let sums_bytes = read(&client, &format!("{REPOSITORY}/download/{tag}/SHA2-256SUMS"), 64 * 1024).await?;
+    let signature = read(&client, &format!("{REPOSITORY}/download/{tag}/SHA2-256SUMS.sig"), 16 * 1024).await?;
+    verify_release_signature(&sums_bytes, &signature)?;
+    let sums = String::from_utf8_lossy(&sums_bytes).into_owned();
     let expected = sums
         .lines()
         .filter_map(|line| line.trim().split_once(char::is_whitespace))
@@ -89,7 +105,13 @@ pub async fn update(tools: &Path, update_dir: &Path) -> Result<Option<String>, S
         let _ = std::fs::remove_file(&staging);
         return Err("The updated yt-dlp did not report the expected version.".into());
     }
-    std::fs::rename(&staging, update_dir.join("yt-dlp.exe")).map_err(|e| {
+    // The copy in use stays as yt-dlp.previous.exe (with its version) until the next update.
+    let current = update_dir.join("yt-dlp.exe");
+    if current.exists() {
+        let _ = std::fs::rename(&current, update_dir.join("yt-dlp.previous.exe"));
+        let _ = std::fs::rename(update_dir.join("yt-dlp.version"), update_dir.join("yt-dlp.previous.version"));
+    }
+    std::fs::rename(&staging, &current).map_err(|e| {
         let _ = std::fs::remove_file(&staging);
         e.to_string()
     })?;
@@ -100,6 +122,19 @@ pub async fn update(tools: &Path, update_dir: &Path) -> Result<Option<String>, S
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_release_key_verifies_a_real_checksum_list_and_nothing_else() {
+        let sums = include_bytes!("../tests/fixtures/SHA2-256SUMS");
+        let signature = include_bytes!("../tests/fixtures/SHA2-256SUMS.sig");
+        verify_release_signature(sums, signature).unwrap();
+        // One changed checksum (a swapped yt-dlp.exe) is refused.
+        let mut tampered = sums.to_vec();
+        let at = tampered.iter().position(|b| b.is_ascii_hexdigit()).unwrap();
+        tampered[at] = if tampered[at] == b'0' { b'1' } else { b'0' };
+        assert!(verify_release_signature(&tampered, signature).is_err());
+        assert!(verify_release_signature(sums, b"not a signature").is_err());
+    }
 
     #[test]
     fn versions_compare_as_dates() {
