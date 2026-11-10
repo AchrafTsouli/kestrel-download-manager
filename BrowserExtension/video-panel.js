@@ -58,7 +58,7 @@
       .list{max-height:220px;overflow:auto;margin-top:4px}.source{display:block;width:100%;text-align:left;background:transparent;border:0;border-radius:4px;padding:8px}.source strong{display:block;font-weight:600}.meta{display:block;color:#8496a8;font-size:11px;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
       .load{margin:4px 0;background:transparent;color:#a9bccd;font-size:11px;border:1px solid #2c3a4a}
       .status{padding:6px 7px;color:#c4d1dd;font-size:11px}.note{padding:4px 7px;color:#8496a8;font-size:11px}
-    </style><div class="panel"><div class="bar"><button class="trigger" aria-expanded="false" aria-haspopup="true"><span class="arrow">▼</span>Download this video</button><button class="close" aria-label="Hide video download panel" title="Hide for this player">×</button></div><div class="menu" hidden><div class="heading"></div><button class="all">↓ Download all sources</button><button class="load all" hidden>Load available qualities</button><div class="list"></div><div class="status" role="status" aria-live="polite"></div><div class="note">Flux video downloads · audio included in listed qualities</div></div></div>`;
+    </style><div class="panel"><div class="bar"><button class="trigger" aria-expanded="false" aria-haspopup="true"><span class="arrow">▼</span>Download this video</button><button class="close" aria-label="Hide video download panel" title="Hide for this player">×</button></div><div class="menu" hidden><div class="heading"></div><button class="all">↓ Download all sources</button><button class="load all" hidden>Load available qualities</button><div class="list"></div><div class="status" role="status" aria-live="polite"></div><div class="note">Kestrel video downloads · audio included in listed qualities</div></div></div>`;
     const select = selector => root.querySelector(selector);
     const panel = { video, host, root, items: [], signature: '', busy: false, loading: false, catalog: null, page: null, dismissed: false, source: video.currentSrc || video.src };
     const bar = select('.bar');
@@ -93,7 +93,7 @@
             panel.page = target; panel.isStream = !response.videoPage && !!response.stream;
             panel.generic = !response.videoPage && !response.stream && !!response.genericPage;
             panel.catalog = null; panel.loadError = false;
-            select('.load').textContent = panel.generic ? 'Find available qualities with Flux' : 'Load available qualities';
+            select('.load').textContent = panel.generic ? 'Find available qualities with Kestrel' : 'Load available qualities';
           }
           select('.load').hidden = !panel.page || !!video.mediaKeys;
           const direct = sources(video);
@@ -106,11 +106,11 @@
         }
         if (!panel.busy && !panel.loading && !panel.loadError && panel.items.length === 0 && response?.ok) status.textContent = video.mediaKeys
           ? 'Protected video: downloading is unavailable.'
-          : panel.generic ? 'Click “Find available qualities” to let Flux look for this video.'
+          : panel.generic ? 'Click “Find available qualities” to let Kestrel look for this video.'
           : panel.page ? 'Open the quality list to download this video with its audio.' : (video.currentSrc || video.src).startsWith('blob:')
-            ? 'Streaming player detected. Keep it playing for a moment so Flux can find its HLS/DASH stream.'
+            ? 'Streaming player detected. Keep it playing for a moment so Kestrel can find its HLS/DASH stream.'
             : 'Waiting for a downloadable video source. Start playback to detect it.';
-      } catch { draw([]); if (!panel.busy) status.textContent = 'Extension connection interrupted. Refresh this page after updating Flux.'; }
+      } catch { draw([]); if (!panel.busy) status.textContent = 'Extension connection interrupted. Refresh this page after updating Kestrel.'; }
       position(panel);
       if (panel.page && !panel.generic && !panel.catalog && !panel.loading && !panel.loadError && !document.hidden && activeVideo === video && panel.inViewport !== false) loadFormats(false,true);
     }
@@ -121,12 +121,12 @@
       let sent = 0;
       try {
         for (const item of items) {
-          status.textContent = `Opening in Flux… ${sent + 1}/${items.length}`;
+          status.textContent = `Opening in Kestrel… ${sent + 1}/${items.length}`;
           const response = await chrome.runtime.sendMessage(item.formatId ? {action:'video-download',formatId:item.formatId,pageUrl:location.href,streamUrl:panel.isStream ? panel.page : undefined,generic:panel.generic} : { action: 'media-download', url: item.url, sources: sources(video), resources: resourceSources(), pageUrl: location.href });
-          if (!response?.ok) throw new Error(response?.error || 'Flux is unavailable. Check the browser bridge.');
+          if (!response?.ok) throw new Error(response?.error || 'Kestrel is unavailable. Check the browser bridge.');
           sent++;
         }
-        status.textContent = `${sent === 1 ? 'Video' : `${sent} sources`} sent to Flux.`;
+        status.textContent = `${sent === 1 ? 'Video' : `${sent} sources`} sent to Kestrel.`;
       } catch (error) { status.textContent = `${sent ? `${sent} sent. ` : ''}${error.message}`; }
       finally { panel.busy = false; root.querySelectorAll('.source,.all:not(.load)').forEach(button => button.disabled = false); }
     }
@@ -141,7 +141,7 @@
         if (panel.page !== requestedPage || !panel.isStream && !panel.generic && requestedPage !== ApexMedia.videoPage(location.href)) return;
         panel.catalog = response.video;
         draw(response.video.formats.map(item => ({...item,size:item.totalBytes})));
-        status.textContent = 'Audio is included; Flux assembles separate tracks automatically.';
+        status.textContent = 'Audio is included; Kestrel assembles separate tracks automatically.';
         select('.load').textContent = 'Reload available qualities';
       } catch (error) { panel.loadError = true; status.textContent = error.message; }
       finally { panel.loading = false; select('.load').disabled = false; position(panel); }

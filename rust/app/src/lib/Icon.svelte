@@ -1,5 +1,5 @@
 <script lang="ts">
-  // Flux's own line icons (32-unit grid), drawn for Flux: toolbar actions, folders and file types.
+  // Kestrel's own line icons (32-unit grid), drawn for Kestrel: toolbar actions, folders and file types.
   let { name, size = 32 }: { name: string; size?: number } = $props();
   const colors: Record<string, string> = { Compressed: "#a78bfa", Documents: "#60a5fa", Music: "#f472b6", Programs: "#38bdf8", Video: "#2dd4bf", Images: "#4ade80", Other: "#94a3b8" };
 </script>

@@ -71,7 +71,7 @@
           <label for="max">Download at once</label><input id="max" class="input short" type="number" min="1" max="16" bind:value={queue.maxActive} />
           <label for="after">When done</label>
           <select id="after" class="input short2" bind:value={queue.after}>
-            <option value="nothing">Do nothing</option><option value="exit">Exit Flux</option><option value="sleep">Sleep</option><option value="hibernate">Hibernate</option><option value="shutdown">Shut down the computer</option>
+            <option value="nothing">Do nothing</option><option value="exit">Exit Kestrel</option><option value="sleep">Sleep</option><option value="hibernate">Hibernate</option><option value="shutdown">Shut down the computer</option>
           </select>
         </div>
         <fieldset class="group">

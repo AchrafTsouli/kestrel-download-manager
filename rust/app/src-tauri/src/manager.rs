@@ -1041,7 +1041,7 @@ fn aria2_path() -> PathBuf {
 /// Windows' own VPN dialler, with the profile's saved credentials.
 #[cfg(not(windows))]
 async fn rasdial(_profile: &str, _disconnect: bool) -> Result<(), String> {
-    Err("Connecting a VPN from Flux is available on Windows only; connect it from your system's network settings.".into())
+    Err("Connecting a VPN from Kestrel is available on Windows only; connect it from your system's network settings.".into())
 }
 #[cfg(windows)]
 async fn rasdial(profile: &str, disconnect: bool) -> Result<(), String> {

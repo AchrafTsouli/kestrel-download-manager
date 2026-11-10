@@ -1,0 +1,52 @@
+{
+  "brand": "KESTREL",
+  "app_png_sizes": [
+    16,
+    20,
+    24,
+    32,
+    40,
+    48,
+    64,
+    96,
+    128,
+    192,
+    256,
+    512,
+    1024
+  ],
+  "windows_ico_frames": [
+    16,
+    20,
+    24,
+    32,
+    40,
+    48,
+    64,
+    96,
+    128,
+    192,
+    256
+  ],
+  "tray_png_and_ico_sizes": [
+    16,
+    20,
+    24,
+    32,
+    40,
+    48,
+    64
+  ],
+  "tray_themes": {
+    "dark-taskbar": "#FFFFFF",
+    "light-taskbar": "#182434"
+  },
+  "tray_states": {
+    "idle": "Falcon alone; no active transfers",
+    "downloading": "Cyan circle and down arrow; active transfers",
+    "paused": "Amber circle and pause bars; work pending but paused",
+    "complete": "Green circle and check; queue just finished",
+    "error": "Red circle and exclamation; user attention required"
+  },
+  "note": "PNG sizes are antialiased exports from the masters, not individually hand-drawn pixel variants."
+}

@@ -15,20 +15,20 @@
 
 [Setup]
 AppId={{F14B83CB-285D-459F-9E24-57D4E44F6D56}
-AppName=Flux
+AppName=Kestrel Download Manager
 AppVersion={#AppVersion}
-AppPublisher=Flux
-DefaultDirName={localappdata}\Programs\Flux
-DefaultGroupName=Flux
+AppPublisher=Achraf Tsouli
+DefaultDirName={localappdata}\Programs\Kestrel
+DefaultGroupName=Kestrel Download Manager
 DisableProgramGroupPage=no
 PrivilegesRequired=lowest
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 MinVersion=10.0.19045
-UninstallDisplayIcon={app}\Flux.exe
+UninstallDisplayIcon={app}\Kestrel.exe
 SetupIconFile={#PayloadDir}\app.ico
 OutputDir={#OutputDir}
-OutputBaseFilename=Flux-Setup-{#AppVersion}-win-x64
+OutputBaseFilename=Kestrel-Setup-{#AppVersion}-win-x64
 Compression=lzma2/fast
 SolidCompression=yes
 WizardStyle=modern
@@ -48,23 +48,23 @@ Name: "startup"; Description: "{cm:StartupTask}"; Flags: unchecked
 
 [CustomMessages]
 english.DesktopTask=Create a desktop shortcut
-english.BrowserTask=Connect Flux to Chrome, Edge and Brave (extension setup still required)
-english.StartupTask=Start Flux in the system tray when I sign in to Windows
+english.BrowserTask=Connect Kestrel to Chrome, Edge and Brave (extension setup still required)
+english.StartupTask=Start Kestrel in the system tray when I sign in to Windows
 english.BrowserGuide=Set up the Chrome and Brave extension
-english.LaunchApp=Launch Flux
-english.NoWebView=Flux needs Microsoft Edge WebView2, which is missing on this PC.%n%nInstall the "Evergreen Bootstrapper" from https://developer.microsoft.com/microsoft-edge/webview2/ and run this setup again.
+english.LaunchApp=Launch Kestrel
+english.NoWebView=Kestrel needs Microsoft Edge WebView2, which is missing on this PC.%n%nInstall the "Evergreen Bootstrapper" from https://developer.microsoft.com/microsoft-edge/webview2/ and run this setup again.
 french.DesktopTask=Créer un raccourci sur le Bureau
-french.BrowserTask=Connecter Flux à Chrome, Edge et Brave (extension à charger dans le navigateur)
-french.StartupTask=Démarrer Flux dans la zone de notification à l'ouverture de session Windows
+french.BrowserTask=Connecter Kestrel à Chrome, Edge et Brave (extension à charger dans le navigateur)
+french.StartupTask=Démarrer Kestrel dans la zone de notification à l'ouverture de session Windows
 french.BrowserGuide=Configurer l'extension Chrome et Brave
-french.LaunchApp=Lancer Flux
-french.NoWebView=Flux a besoin de Microsoft Edge WebView2, absent de ce PC.%n%nInstallez le « Evergreen Bootstrapper » depuis https://developer.microsoft.com/microsoft-edge/webview2/ puis relancez cette installation.
+french.LaunchApp=Lancer Kestrel
+french.NoWebView=Kestrel a besoin de Microsoft Edge WebView2, absent de ce PC.%n%nInstallez le « Evergreen Bootstrapper » depuis https://developer.microsoft.com/microsoft-edge/webview2/ puis relancez cette installation.
 
 [Messages]
-english.SetupAppRunningError=Flux is still running, possibly in the system tray.%n%nChoose Tasks > Exit or Exit from the tray menu, then click OK. Downloads will be preserved.
-english.UninstallAppRunningError=Flux is still running, possibly in the system tray.%n%nChoose Tasks > Exit or Exit from the tray menu, then click OK. Downloads will be preserved.
-french.SetupAppRunningError=Flux est encore ouvert, peut-être dans la zone de notification.%n%nChoisissez Tasks > Exit ou Quitter dans le menu de l'icône, puis cliquez sur OK. Vos téléchargements seront conservés.
-french.UninstallAppRunningError=Flux est encore ouvert, peut-être dans la zone de notification.%n%nChoisissez Tasks > Exit ou Quitter dans le menu de l'icône, puis cliquez sur OK. Vos téléchargements seront conservés.
+english.SetupAppRunningError=Kestrel is still running, possibly in the system tray.%n%nChoose Tasks > Exit or Exit from the tray menu, then click OK. Downloads will be preserved.
+english.UninstallAppRunningError=Kestrel is still running, possibly in the system tray.%n%nChoose Tasks > Exit or Exit from the tray menu, then click OK. Downloads will be preserved.
+french.SetupAppRunningError=Kestrel est encore ouvert, peut-être dans la zone de notification.%n%nChoisissez Tasks > Exit ou Quitter dans le menu de l'icône, puis cliquez sur OK. Vos téléchargements seront conservés.
+french.UninstallAppRunningError=Kestrel est encore ouvert, peut-être dans la zone de notification.%n%nChoisissez Tasks > Exit ou Quitter dans le menu de l'icône, puis cliquez sur OK. Vos téléchargements seront conservés.
 
 [Files]
 Source: "{#PayloadDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
@@ -79,15 +79,19 @@ Type: files; Name: "{app}\wpfgfx_cor3.dll"
 Type: files; Name: "{app}\e_sqlite3.dll"
 Type: files; Name: "{app}\deployment.json"
 Type: files; Name: "{app}\licenses\Microsoft.*"
-; Upgrades from Apex Downloader: the program file and shortcuts were renamed to Flux.
+; Upgrades from Flux (1.x and earlier 2.0 builds): the program and its shortcuts are now Kestrel.
+Type: files; Name: "{app}\Kestrel.exe"
+Type: files; Name: "{group}\Flux.lnk"
+Type: files; Name: "{userdesktop}\Flux.lnk"
+; Upgrades from Apex Downloader: the program file and shortcuts were renamed.
 Type: files; Name: "{app}\ApexDownloader.exe"
 Type: files; Name: "{group}\Apex Downloader.lnk"
 Type: files; Name: "{userdesktop}\Apex Downloader.lnk"
 
 [Icons]
-Name: "{group}\Flux"; Filename: "{app}\Flux.exe"; WorkingDir: "{app}"
+Name: "{group}\Kestrel Download Manager"; Filename: "{app}\Kestrel.exe"; WorkingDir: "{app}"
 Name: "{group}\{cm:BrowserGuide}"; Filename: "{app}\Browser-Setup.html"
-Name: "{userdesktop}\Flux"; Filename: "{app}\Flux.exe"; WorkingDir: "{app}"; Tasks: desktopicon
+Name: "{userdesktop}\Kestrel Download Manager"; Filename: "{app}\Kestrel.exe"; WorkingDir: "{app}"; Tasks: desktopicon
 
 [Registry]
 Root: HKCU32; Subkey: "Software\Google\Chrome\NativeMessagingHosts\com.swiftfetch.bridge"; ValueType: string; ValueData: "{app}\com.swiftfetch.bridge.json"; Tasks: browserintegration
@@ -96,14 +100,14 @@ Root: HKCU32; Subkey: "Software\BraveSoftware\Brave-Browser\NativeMessagingHosts
 Root: HKCU64; Subkey: "Software\BraveSoftware\Brave-Browser\NativeMessagingHosts\com.swiftfetch.bridge"; ValueType: string; ValueData: "{app}\com.swiftfetch.bridge.json"; Tasks: browserintegration
 Root: HKCU32; Subkey: "Software\Microsoft\Edge\NativeMessagingHosts\com.swiftfetch.bridge"; ValueType: string; ValueData: "{app}\com.swiftfetch.bridge.json"; Tasks: browserintegration
 Root: HKCU64; Subkey: "Software\Microsoft\Edge\NativeMessagingHosts\com.swiftfetch.bridge"; ValueType: string; ValueData: "{app}\com.swiftfetch.bridge.json"; Tasks: browserintegration
-Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "ApexDownloader"; ValueData: """{app}\Flux.exe"" --background"; Tasks: startup
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "ApexDownloader"; ValueData: """{app}\Kestrel.exe"" --background"; Tasks: startup
 
 [Run]
 ; Firefox finds the bridge through its own manifest and key (Chromium ones are written above).
 Filename: "{app}\flux-nmhost.exe"; Parameters: "--register-firefox"; Flags: runhidden; Tasks: browserintegration
-Filename: "{app}\Flux.exe"; Description: "{cm:LaunchApp}"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\Kestrel.exe"; Description: "{cm:LaunchApp}"; Flags: nowait postinstall skipifsilent
 ; In-app updates run silently; relaunch the updated app afterwards.
-Filename: "{app}\Flux.exe"; Flags: nowait; Check: WizardSilent
+Filename: "{app}\Kestrel.exe"; Flags: nowait; Check: WizardSilent
 Filename: "{app}\Browser-Setup.html"; Description: "{cm:BrowserGuide}"; Flags: shellexec postinstall skipifsilent unchecked; Tasks: browserintegration
 
 [UninstallDelete]
@@ -118,7 +122,7 @@ begin
   Result := '"' + Value + '"';
 end;
 
-// Flux's windows are drawn by WebView2 (part of Windows 11 and of current Windows 10).
+// Kestrel's windows are drawn by WebView2 (part of Windows 11 and of current Windows 10).
 function WebViewInstalled: Boolean;
 var
   Version: String;
@@ -149,17 +153,17 @@ begin
      RegQueryStringValue(HKCU, 'Software\Microsoft\Windows\CurrentVersion\Uninstall\{F14B83CB-285D-459F-9E24-57D4E44F6D56}_is1', 'InstallLocation', PreviousFolder) and
      (CompareText(AddBackslash(PreviousFolder), AddBackslash(ExpandConstant('{app}'))) = 0) then begin
     if not Exec(ExpandConstant('{app}\unins000.exe'), '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART', '', SW_HIDE, ewWaitUntilTerminated, ExitCode) or (ExitCode <> 0) then begin
-      Result := 'Could not remove the previous Flux files. Quit Flux from its tray menu and retry. Your downloads and history are retained.';
+      Result := 'Could not remove the previous program files. Quit Kestrel from its tray menu and retry. Your downloads and history are retained.';
       Exit;
     end;
   end;
   // Build the machine-specific manifest before any browser registry entry changes.
   if not ForceDirectories(ExpandConstant('{app}')) then begin
-    Result := 'Could not create the Flux installation folder.';
+    Result := 'Could not create the Kestrel installation folder.';
     Exit;
   end;
   Manifest := ExpandConstant('{app}\com.swiftfetch.bridge.json');
-  Json := '{"name":"com.swiftfetch.bridge","description":"Flux browser bridge",' +
+  Json := '{"name":"com.swiftfetch.bridge","description":"Kestrel browser bridge",' +
     '"path":' + JsonString(ExpandConstant('{app}\flux-nmhost.exe')) +
     ',"type":"stdio","allowed_origins":["chrome-extension://{#ExtensionId}/"]}';
   if not SaveStringToFile(Manifest, Utf8Encode(Json), False) then
@@ -192,7 +196,8 @@ begin
     RemoveOwnedBridge(HKCU32, 'Software\Microsoft\Edge');
     RemoveOwnedBridge(HKCU64, 'Software\Microsoft\Edge');
     if RegQueryStringValue(HKCU, 'Software\Microsoft\Windows\CurrentVersion\Run', 'ApexDownloader', Existing) and
-       ((CompareText(Existing, ExpandConstant('"{app}\Flux.exe" --background')) = 0) or
+       ((CompareText(Existing, ExpandConstant('"{app}\Kestrel.exe" --background')) = 0) or
+        (CompareText(Existing, ExpandConstant('"{app}\Flux.exe" --background')) = 0) or
         (CompareText(Existing, ExpandConstant('"{app}\SwiftFetch.exe" --background')) = 0) or
         (CompareText(Existing, ExpandConstant('"{app}\ApexDownloader.exe" --background')) = 0)) then
       RegDeleteValue(HKCU, 'Software\Microsoft\Windows\CurrentVersion\Run', 'ApexDownloader');
@@ -215,7 +220,8 @@ begin
     end;
     if not WizardIsTaskSelected('startup') then
       if RegQueryStringValue(HKCU, 'Software\Microsoft\Windows\CurrentVersion\Run', 'ApexDownloader', Existing) and
-         ((CompareText(Existing, ExpandConstant('"{app}\Flux.exe" --background')) = 0) or
+         ((CompareText(Existing, ExpandConstant('"{app}\Kestrel.exe" --background')) = 0) or
+        (CompareText(Existing, ExpandConstant('"{app}\Flux.exe" --background')) = 0) or
           (CompareText(Existing, ExpandConstant('"{app}\SwiftFetch.exe" --background')) = 0) or
         (CompareText(Existing, ExpandConstant('"{app}\ApexDownloader.exe" --background')) = 0)) then
         RegDeleteValue(HKCU, 'Software\Microsoft\Windows\CurrentVersion\Run', 'ApexDownloader');

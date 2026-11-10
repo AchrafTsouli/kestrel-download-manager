@@ -26,7 +26,7 @@ pub fn socket_path() -> PathBuf {
 fn same_user(stream: &UnixStream) -> std::io::Result<()> {
     match stream.peer_cred() {
         Ok(cred) if cred.uid() == uid() => Ok(()),
-        Ok(_) => Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "The Flux socket is used by another user's program.")),
+        Ok(_) => Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "The Kestrel socket is used by another user's program.")),
         Err(e) => Err(e),
     }
 }
@@ -43,7 +43,7 @@ fn listen_at(path: &std::path::Path) -> std::io::Result<Listener> {
     if path.exists() {
         // A socket nobody answers on is left from a crash.
         if std::os::unix::net::UnixStream::connect(path).is_ok() {
-            return Err(std::io::Error::new(std::io::ErrorKind::AddrInUse, "Flux is already running."));
+            return Err(std::io::Error::new(std::io::ErrorKind::AddrInUse, "Kestrel is already running."));
         }
         std::fs::remove_file(path)?;
     }

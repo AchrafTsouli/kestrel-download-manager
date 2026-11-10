@@ -3,6 +3,7 @@
 mod bridge;
 mod crash;
 mod desktop;
+mod tray_state;
 mod extract;
 mod i18n;
 mod manager;
@@ -122,7 +123,7 @@ pub fn offer(app: &AppHandle, request: PendingRequest, force_dialog: bool) -> Re
     // Torrents open their file list.
     if is_torrent_source(&request.url) {
         if !manager.torrents.available() {
-            return Err("The torrent engine is missing from this installation. Reinstall Flux to restore it.".into());
+            return Err("The torrent engine is missing from this installation. Reinstall Kestrel to restore it.".into());
         }
         let pending_id = pending_id();
         app.state::<Windows>().pending.lock().unwrap().insert(pending_id.clone(), Pending { id: pending_id.clone(), request, probe: None, video: None, torrent: None });
@@ -569,7 +570,7 @@ fn exit_app(app: AppHandle) {
 async fn register_browsers() -> Result<String, String> {
     let host = std::env::current_exe().map_err(|e| e.to_string())?.with_file_name(format!("flux-nmhost{}", std::env::consts::EXE_SUFFIX));
     if !host.exists() {
-        return Err("flux-nmhost.exe is missing beside Flux.".into());
+        return Err("flux-nmhost.exe is missing beside Kestrel.".into());
     }
     let mut command = std::process::Command::new(host);
     command.arg("--register");
@@ -717,7 +718,7 @@ fn clipboard_monitor(app: AppHandle) {
 fn tray_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
     let language = i18n::resolve(&app.state::<Shared>().settings.read().unwrap().language);
     let item = |id: &str, text: &'static str| MenuItem::with_id(app, id, i18n::tr(language, text), true, None::<&str>);
-    let (show, add, pause, resume, quit) = (item("show", "Open Flux")?, item("add", "Add URL…")?, item("pause", "Pause all")?, item("resume", "Resume all")?, item("quit", "Exit")?);
+    let (show, add, pause, resume, quit) = (item("show", "Open Kestrel")?, item("add", "Add URL…")?, item("pause", "Pause all")?, item("resume", "Resume all")?, item("quit", "Exit")?);
     Menu::with_items(app, &[&show, &add, &PredefinedMenuItem::separator(app)?, &pause, &resume, &PredefinedMenuItem::separator(app)?, &quit])
 }
 
@@ -805,6 +806,7 @@ pub fn run() {
             });
             tray(&handle)?;
             desktop::taskbar_progress(handle.clone());
+            tray_state::watch(handle.clone());
             scheduler(handle.clone());
             clipboard_monitor(handle.clone());
             bridge::serve(handle.clone());
@@ -836,5 +838,5 @@ pub fn run() {
             open_file, show_in_folder, open_folder, show_progress, show_window, power_action, exit_app, app_version
         ])
         .run(tauri::generate_context!())
-        .expect("Flux could not start");
+        .expect("Kestrel could not start");
 }

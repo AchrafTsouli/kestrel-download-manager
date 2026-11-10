@@ -43,8 +43,8 @@
       <div class="win-body">
         {#if tab === "General"}
           <h2>General</h2>
-          <label class="check"><input type="checkbox" bind:checked={s.startWithWindows} /> Start Flux when I sign in to Windows (in the tray)</label>
-          <label class="check"><input type="checkbox" bind:checked={s.minimizeToTray} /> Closing the main window keeps Flux running in the tray</label>
+          <label class="check"><input type="checkbox" bind:checked={s.startWithWindows} /> Start Kestrel when I sign in to Windows (in the tray)</label>
+          <label class="check"><input type="checkbox" bind:checked={s.minimizeToTray} /> Closing the main window keeps Kestrel running in the tray</label>
           <label class="check"><input type="checkbox" bind:checked={s.monitorClipboard} /> Offer download links I copy</label>
           <label class="check"><input type="checkbox" bind:checked={s.playSounds} /> Play a sound when a download finishes</label>
           <div class="form">
@@ -111,18 +111,18 @@
           </fieldset>
           <div class="form">
             <label for="ua">Browser identity</label>
-            <input id="ua" class="input" bind:value={s.userAgent} placeholder="Flux's built-in identity (a current Chrome)" spellcheck="false" />
+            <input id="ua" class="input" bind:value={s.userAgent} placeholder="Kestrel's built-in identity (a current Chrome)" spellcheck="false" />
           </div>
           <fieldset class="group">
             <legend>Sites that allow fewer connections</legend>
-            {#if limits.length === 0}<p class="note">None yet. When a site refuses extra connections, Flux remembers how many work and uses that next time.</p>{/if}
+            {#if limits.length === 0}<p class="note">None yet. When a site refuses extra connections, Kestrel remembers how many work and uses that next time.</p>{/if}
             {#each limits as [host, n]}
               <div class="row"><span class="host">{host}</span><span class="muted">{n} connection{n === 1 ? "" : "s"}</span><button class="btn small" onclick={() => { delete s!.hostLimits[host]; s!.hostLimits = { ...s!.hostLimits }; }}>Forget</button></div>
             {/each}
           </fieldset>
         {:else if tab === "Site logins"}
           <h2>Site logins</h2>
-          <p class="note">Flux signs in with these when a download from the site asks for a password (unless the browser already sent one). Saved encrypted for your Windows account.</p>
+          <p class="note">Kestrel signs in with these when a download from the site asks for a password (unless the browser already sent one). Saved encrypted for your Windows account.</p>
           {#each s.siteLogins as login, i}
             <fieldset class="group">
               <div class="row">
@@ -176,13 +176,13 @@
           <textarea id="excluded" class="input" rows="3" bind:value={s.excludedSites} spellcheck="false"></textarea>
           <div class="row">
             <button class="btn" onclick={async () => { try { error = ""; bridgeNote = await call<string>("register_browsers"); } catch (e) { error = String(e); } }}>Connect browsers</button>
-            <span class="muted">{bridgeNote || "Lets Chrome, Edge and Brave send downloads to this copy of Flux."}</span>
+            <span class="muted">{bridgeNote || "Lets Chrome, Edge and Brave send downloads to this copy of Kestrel."}</span>
           </div>
         {:else if tab === "Updates"}
           <h2>Updates</h2>
-          <label class="check"><input type="checkbox" bind:checked={s.autoCheckUpdates} /> Check for new versions of Flux every day</label>
+          <label class="check"><input type="checkbox" bind:checked={s.autoCheckUpdates} /> Check for new versions of Kestrel every day</label>
           <label class="check"><input type="checkbox" bind:checked={s.autoUpdateTools} /> Keep the video downloader (yt-dlp) up to date</label>
-          <div class="form"><label for="feed">Update feed</label><input id="feed" class="input" bind:value={s.updateFeed} placeholder="Official Flux releases on GitHub" spellcheck="false" /></div>
+          <div class="form"><label for="feed">Update feed</label><input id="feed" class="input" bind:value={s.updateFeed} placeholder="Official Kestrel releases on GitHub" spellcheck="false" /></div>
         {/if}
         {#if error}<p class="error-text">{error}</p>{/if}
       </div>

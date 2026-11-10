@@ -18,7 +18,7 @@ crate-type = ["rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = ["tray-icon"] }
+tauri = { version = "2", features = ["tray-icon", "image-png"] }
 tauri-plugin-single-instance = "2"
 tauri-plugin-dialog = "2"
 serde.workspace = true
@@ -41,4 +41,4 @@ tauri-plugin-drag = "2"
 tauri-plugin-notification = "2"
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Globalization", "Win32_Security", "Win32_System_Diagnostics_Debug", "Win32_System_Threading", "Win32_UI_WindowsAndMessaging"] }
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Globalization", "Win32_Security", "Win32_System_Registry", "Win32_System_Diagnostics_Debug", "Win32_System_Threading", "Win32_UI_WindowsAndMessaging"] }

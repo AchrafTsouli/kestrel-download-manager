@@ -84,7 +84,7 @@ pub fn set_autostart(enabled: bool) {
         let entry = config.join("autostart/flux.desktop");
         if enabled {
             let exe = std::env::var_os("APPIMAGE").map(std::path::PathBuf::from).or_else(|| std::env::current_exe().ok()).map(|p| p.display().to_string()).unwrap_or_default();
-            let text = format!("[Desktop Entry]\nType=Application\nName=Flux\nExec=\"{exe}\" --background\nX-GNOME-Autostart-enabled=true\n");
+            let text = format!("[Desktop Entry]\nType=Application\nName=Kestrel\nExec=\"{exe}\" --background\nX-GNOME-Autostart-enabled=true\n");
             let _ = std::fs::create_dir_all(entry.parent().unwrap()).and_then(|_| std::fs::write(&entry, text));
         } else {
             let _ = std::fs::remove_file(entry);

@@ -36,7 +36,7 @@ pub use plan::{Plan, Segment};
 pub use session::{Cookie, Header, Session};
 
 /// Used when a bot check refuses the browser identity (see `probe`).
-pub const HONEST_USER_AGENT: &str = concat!("Flux/", env!("CARGO_PKG_VERSION"), " (+https://github.com/AchrafTsouli/flux-downloader)");
+pub const HONEST_USER_AGENT: &str = concat!("Kestrel/", env!("CARGO_PKG_VERSION"), " (+https://github.com/AchrafTsouli/flux-downloader)");
 
 fn is_bot_challenge(response: &reqwest::Response) -> bool {
     let headers = response.headers();

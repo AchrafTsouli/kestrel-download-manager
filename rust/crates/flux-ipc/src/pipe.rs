@@ -103,7 +103,7 @@ async fn connect_named(name: &str, timeout: Duration) -> std::io::Result<NamedPi
         }
     };
     if !same_user {
-        return Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "The Flux pipe is served by another user's program."));
+        return Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "The Kestrel pipe is served by another user's program."));
     }
     Ok(client)
 }

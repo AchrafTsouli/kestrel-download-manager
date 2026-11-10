@@ -24,7 +24,7 @@ fn windows_language() -> String {
 }
 
 const TABLE: &[(&str, &str, &str)] = &[
-    ("Open Flux", "Ouvrir Flux", "فتح Flux"),
+    ("Open Kestrel", "Ouvrir Kestrel", "فتح Kestrel"),
     ("Add URL…", "Ajouter un lien…", "إضافة رابط…"),
     ("Pause all", "Tout mettre en pause", "إيقاف الكل مؤقتًا"),
     ("Resume all", "Tout reprendre", "استئناف الكل"),

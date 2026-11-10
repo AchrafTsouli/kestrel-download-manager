@@ -19,7 +19,7 @@ pub fn install(version: String) {
         let place = info.location().map(|l| format!("{}:{}", l.file(), l.line())).unwrap_or_default();
         let thread = std::thread::current().name().unwrap_or("unnamed").to_string();
         let report = format!(
-            "Flux {version}\nSystem: {} {}\nThread: {thread}\nWhere: {place}\nError: {}\n",
+            "Kestrel {version}\nSystem: {} {}\nThread: {thread}\nWhere: {place}\nError: {}\n",
             std::env::consts::OS,
             std::env::consts::ARCH,
             // Errors can quote a path or an address; keep only the first line and cut it short.
@@ -78,7 +78,7 @@ pub fn issue_url(id: &str) -> Result<String, String> {
     let text = std::fs::read_to_string(folder().join(id)).map_err(|e| e.to_string())?;
     let error = text.lines().find_map(|l| l.strip_prefix("Error: ")).unwrap_or("crash");
     let title = format!("Crash: {}", error.chars().take(80).collect::<String>());
-    let body = format!("Flux closed unexpectedly.\n\nWhat I was doing:\n\n\n---\n```\n{text}```\n");
+    let body = format!("Kestrel closed unexpectedly.\n\nWhat I was doing:\n\n\n---\n```\n{text}```\n");
     Ok(format!("https://github.com/AchrafTsouli/flux-downloader/issues/new?title={}&body={}", encode(&title), encode(&body)))
 }
 

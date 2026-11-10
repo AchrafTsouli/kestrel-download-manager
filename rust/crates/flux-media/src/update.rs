@@ -83,7 +83,7 @@ async fn read(client: &reqwest::Client, url: &str, limit: usize) -> Result<Vec<u
 
 /// Installs a newer yt-dlp if one exists. Returns the new version, or `None` when already current.
 pub async fn update(tools: &Path, update_dir: &Path) -> Result<Option<String>, String> {
-    let client = reqwest::Client::builder().timeout(Duration::from_secs(300)).user_agent("Flux").build().map_err(|e| e.to_string())?;
+    let client = reqwest::Client::builder().timeout(Duration::from_secs(300)).user_agent("Kestrel").build().map_err(|e| e.to_string())?;
     // /releases/latest redirects to /releases/tag/<version>.
     let response = client.get(format!("{REPOSITORY}/latest")).send().await.map_err(|e| format!("Could not reach GitHub: {e}"))?;
     let tag = response.url().path().rsplit_once("/releases/tag/").map(|(_, t)| t.to_string()).ok_or("Could not read the latest yt-dlp release.")?;

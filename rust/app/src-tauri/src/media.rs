@@ -12,7 +12,7 @@ use crate::{PendingRequest, offer};
 pub async fn formats(app: &AppHandle, request: &Request) -> Response {
     let manager = app.state::<Shared>().inner().clone();
     if !manager.media.available() {
-        return Response::error("Flux's video tools are missing. Reinstall Flux to restore them.");
+        return Response::error("Kestrel's video tools are missing. Reinstall Kestrel to restore them.");
     }
     let url = request.url.clone().unwrap_or_default();
     let cancel = tokio_util::sync::CancellationToken::new();

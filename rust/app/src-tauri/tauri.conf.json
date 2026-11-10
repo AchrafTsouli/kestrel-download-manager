@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Flux",
+  "productName": "Kestrel Download Manager",
   "version": "2.0.0-alpha.1",
   "identifier": "com.achraftsouli.flux",
   "build": {
@@ -13,7 +13,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "Flux",
+        "title": "Kestrel Download Manager",
         "width": 1180,
         "height": 720,
         "minWidth": 760,

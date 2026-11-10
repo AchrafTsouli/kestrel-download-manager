@@ -4,7 +4,7 @@
   import { save as pickPath } from "@tauri-apps/plugin-dialog";
   import { onMount } from "svelte";
   import Icon from "../lib/Icon.svelte";
-  import { call, categories, size, applyTheme, type Probe, type Settings } from "../lib/api";
+  import { call, categories, size, applyTheme, fitHeight, type Probe, type Settings } from "../lib/api";
 
   let { id }: { id: string } = $props();
   type Pending = { id: string; request: { url: string; fileName: string | null; description: string | null }; probe: Probe | null };
@@ -50,7 +50,7 @@
     nameEdited = true;
     if (!folderEdited) folder = settings.categoryFolders && category !== "Other" ? `${settings.downloadDir}\\${category}` : settings.downloadDir;
   }
-  // "Save As" is the whole path, as in Flux 1.x; folder and name are kept apart behind it.
+  // "Save As" is the whole path, as in Kestrel 1.x; folder and name are kept apart behind it.
   const savePath = $derived(folder ? folder.replace(/[\\/]+$/, "") + "\\" + fileName : fileName);
   function editPath(value: string) {
     const cut = Math.max(value.lastIndexOf("\\"), value.lastIndexOf("/"));
@@ -68,6 +68,8 @@
       win.close();
     } catch (e) { error = String(e); }
   }
+  // Fit the window to its content once it is filled, and when a note or an error appears.
+  $effect(() => { void pending; void note; void error; void checking; fitHeight(); });
   async function cancel() { await call("cancel_pending", { id }); win.close(); }
 </script>
 

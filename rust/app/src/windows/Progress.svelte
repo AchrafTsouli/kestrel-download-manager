@@ -1,5 +1,5 @@
 <script lang="ts">
-  // The progress window, laid out like Flux 1.x's: three tabs (status, speed limiter, options on
+  // The progress window, laid out like Kestrel 1.x's: three tabs (status, speed limiter, options on
   // completion), the progress bar, Hide details / Pause / Cancel, then the connections.
   import { listen } from "@tauri-apps/api/event";
   import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -91,7 +91,7 @@
                   <option value="shutdown">Shut down</option><option value="sleep">Sleep</option><option value="hibernate">Hibernate</option>
                 </select>
               </div>
-              <label class="check"><input type="checkbox" bind:checked={exitWhenDone} disabled={showComplete} onchange={() => { if (exitWhenDone) turnOff = false; applyAfter(); }} /> Exit Flux when done</label>
+              <label class="check"><input type="checkbox" bind:checked={exitWhenDone} disabled={showComplete} onchange={() => { if (exitWhenDone) turnOff = false; applyAfter(); }} /> Exit Kestrel when done</label>
             </div>
           {/if}
         </div>

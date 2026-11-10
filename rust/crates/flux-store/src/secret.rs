@@ -58,7 +58,7 @@ mod imp {
         let path = dir.join("secret.key");
         let bytes = match std::fs::read(&path) {
             Ok(bytes) if bytes.len() == 32 => bytes,
-            Ok(_) => return Err(Error::new(ErrorKind::InvalidData, "Flux's key file is damaged.")),
+            Ok(_) => return Err(Error::new(ErrorKind::InvalidData, "Kestrel's key file is damaged.")),
             Err(e) if e.kind() == ErrorKind::NotFound => {
                 let mut fresh = vec![0u8; 32];
                 getrandom::getrandom(&mut fresh).map_err(|e| Error::other(e.to_string()))?;

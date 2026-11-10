@@ -32,7 +32,7 @@ fn firefox_manifest_path() -> PathBuf {
 }
 fn app_path() -> PathBuf {
     let dir = here();
-    ["Flux.exe", "flux.exe", "flux"].iter().map(|n| dir.join(n)).find(|p| p.exists()).unwrap_or_else(|| dir.join(if cfg!(windows) { "flux.exe" } else { "flux" }))
+    ["Kestrel.exe", "Flux.exe", "flux.exe", "flux"].iter().map(|n| dir.join(n)).find(|p| p.exists()).unwrap_or_else(|| dir.join(if cfg!(windows) { "flux.exe" } else { "flux" }))
 }
 
 /// Where a browser looks for native messaging hosts (current user).
@@ -143,7 +143,7 @@ fn caller_allowed(args: &[String]) -> bool {
 fn register_firefox() -> Result<(), String> {
     let manifest = serde_json::json!({
         "name": HOST_NAME,
-        "description": "Flux browser bridge",
+        "description": "Kestrel browser bridge",
         "path": std::env::current_exe().map_err(|e| e.to_string())?.display().to_string(),
         "type": "stdio",
         "allowed_extensions": [FIREFOX_ID],
@@ -171,7 +171,7 @@ fn register(ids: &[String]) -> Result<(), String> {
     }
     let manifest = serde_json::json!({
         "name": HOST_NAME,
-        "description": "Flux browser bridge",
+        "description": "Kestrel browser bridge",
         "path": std::env::current_exe().map_err(|e| e.to_string())?.display().to_string(),
         "type": "stdio",
         "allowed_origins": ids.iter().map(|id| format!("chrome-extension://{id}/")).collect::<Vec<_>>(),
@@ -228,12 +228,12 @@ async fn forward(request: &Request) -> Response {
         match flux_ipc::pipe::connect(Duration::from_millis(500)).await {
             Ok(mut pipe) => {
                 if let Err(e) = write_frame(&mut pipe, request).await {
-                    return Response::error(format!("Flux did not take the request: {e}"));
+                    return Response::error(format!("Kestrel did not take the request: {e}"));
                 }
                 return match tokio::time::timeout(Duration::from_secs(150), read_frame::<Response>(&mut pipe)).await {
                     Ok(Ok(Some(response))) => response,
-                    Ok(_) => Response::error("Flux closed the connection."),
-                    Err(_) => Response::error("Flux did not answer in time."),
+                    Ok(_) => Response::error("Kestrel closed the connection."),
+                    Err(_) => Response::error("Kestrel did not answer in time."),
                 };
             }
             Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => return Response::error(e.to_string()),
@@ -241,11 +241,11 @@ async fn forward(request: &Request) -> Response {
                 if !started {
                     started = true;
                     if flux_ipc::start_app(&app_path()).is_err() {
-                        return Response::error("Flux is not installed beside the browser bridge.");
+                        return Response::error("Kestrel is not installed beside the browser bridge.");
                     }
                 }
                 if tokio::time::Instant::now() >= deadline {
-                    return Response::error("Flux did not start in time.");
+                    return Response::error("Kestrel did not start in time.");
                 }
                 tokio::time::sleep(Duration::from_millis(300)).await;
             }
@@ -265,13 +265,13 @@ async fn main() {
     let mut stdin = tokio::io::stdin();
     let mut stdout = tokio::io::stdout();
     let response = if !caller_allowed(&args) {
-        Response::error("This extension is not registered for Flux.")
+        Response::error("This extension is not registered for Kestrel.")
     } else {
         match tokio::time::timeout(Duration::from_secs(10), read_frame::<Request>(&mut stdin)).await {
             Ok(Ok(Some(request))) => match flux_ipc::validate(&request) {
                 Err(error) => Response::error(error),
                 Ok(()) => match request.action.as_str() {
-                    "ping" => if app_path().exists() { Response::ok() } else { Response::error("The Flux application is missing.") },
+                    "ping" => if app_path().exists() { Response::ok() } else { Response::error("The Kestrel application is missing.") },
                     "capture-policy" => capture_policy(),
                     _ => forward(&request).await,
                 },

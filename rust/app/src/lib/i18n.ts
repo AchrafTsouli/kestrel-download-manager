@@ -31,7 +31,7 @@ export function unit(name: string): string {
   return UNITS[current]?.[name] ?? name;
 }
 
-/** "auto" follows Windows' language when Flux has it. */
+/** "auto" follows Windows' language when Kestrel has it. */
 export function resolve(code: string): string {
   if (code && code !== "auto") return catalogs[code] || code === "en" ? code : "en";
   const windows = (navigator.language || "en").split("-")[0].toLowerCase();

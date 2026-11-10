@@ -1,5 +1,5 @@
 // Headers the browser sent for a request a moment ago. Some sites accept only exactly that request
-// (client hints, Sec-Fetch-*, language); Flux replays them. Kept in memory for two minutes.
+// (client hints, Sec-Fetch-*, language); Kestrel replays them. Kept in memory for two minutes.
 const sentHeaders = new Map();
 const keptHeaders = /^(accept|accept-language|sec-fetch-(site|mode|dest|user)|sec-ch-ua(-mobile|-platform)?|upgrade-insecure-requests|x-requested-with)$/i;
 export function rememberRequest(details) {

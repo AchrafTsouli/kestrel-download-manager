@@ -90,7 +90,7 @@ impl Tools {
 
     fn command(&self, args: &[String]) -> Result<tokio::process::Child, String> {
         if !self.available() {
-            return Err("The torrent engine (aria2c.exe) is missing. Reinstall Flux to restore it.".into());
+            return Err("The torrent engine (aria2c.exe) is missing. Reinstall Kestrel to restore it.".into());
         }
         let mut command = Command::new(&self.aria2c);
         command.args(args).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::piped()).kill_on_drop(true);

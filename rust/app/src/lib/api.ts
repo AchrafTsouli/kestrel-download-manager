@@ -1,5 +1,19 @@
 import { invoke } from "@tauri-apps/api/core";
 import { unit } from "./i18n";
+import { getCurrentWindow } from "@tauri-apps/api/window";
+import { LogicalSize } from "@tauri-apps/api/dpi";
+import { tick } from "svelte";
+
+/** Makes a dialog exactly as tall as what it shows (like WPF's SizeToContent). */
+export async function fitHeight() {
+  await tick();
+  const root = document.querySelector(".win") as HTMLElement | null;
+  if (!root) return;
+  root.style.height = "auto";
+  const height = Math.ceil(root.getBoundingClientRect().height);
+  root.style.height = "";
+  if (height > 80) await getCurrentWindow().setSize(new LogicalSize(window.innerWidth, height));
+}
 
 export type Status = "Queued" | "Connecting" | "Downloading" | "Retrying" | "Finishing" | "Paused" | "Completed" | "Failed";
 export type Download = {

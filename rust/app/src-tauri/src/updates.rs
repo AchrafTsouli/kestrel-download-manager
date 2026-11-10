@@ -42,7 +42,7 @@ pub async fn install(app: &AppHandle) -> Result<(), String> {
     let feed = manager.settings.read().unwrap().update_feed.clone();
     let release = flux_update::check(&feed).await?;
     if !flux_update::is_newer(&release.version, &current(app)) {
-        return Err(format!("Flux {} is up to date.", current(app)));
+        return Err(format!("Kestrel {} is up to date.", current(app)));
     }
     // The signed installer is for Windows; elsewhere the release page offers the packages.
     #[cfg(not(windows))]
@@ -51,7 +51,7 @@ pub async fn install(app: &AppHandle) -> Result<(), String> {
         return Ok(());
     }
     #[cfg_attr(not(windows), allow(unreachable_code))]
-    let _ = app.emit("message", format!("Downloading Flux {}…", release.version));
+    let _ = app.emit("message", format!("Downloading Kestrel {}…", release.version));
     let installer = flux_update::download_installer(&release).await?;
     manager.shutdown();
     // The installer waits for Flux to close (it holds the app's mutex), so start it a moment later.

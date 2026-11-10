@@ -38,16 +38,18 @@ if (@('yt-dlp.exe','ffmpeg.exe','ffprobe.exe','qjs.exe','aria2c.exe') | Where-Ob
 
 if (Test-Path -LiteralPath $stage) { Remove-Item -LiteralPath $stage -Recurse -Force }
 New-Item -ItemType Directory -Path $stage, (Join-Path $stage 'BrowserExtension'), (Join-Path $stage 'video-tools'), (Join-Path $stage 'licenses') -Force | Out-Null
-Copy-Item -LiteralPath (Join-Path $release 'flux.exe') -Destination (Join-Path $stage 'Flux.exe')
+Copy-Item -LiteralPath (Join-Path $release 'flux.exe') -Destination (Join-Path $stage 'Kestrel.exe')
 Copy-Item -LiteralPath (Join-Path $release 'flux-nmhost.exe'), (Join-Path $release 'flux-cli.exe') -Destination $stage
 Get-ChildItem -LiteralPath (Join-Path $root 'BrowserExtension') -File | Where-Object { $_.Name -ne 'package.json' -and $_.Name -notlike '*.test.js' } |
     Copy-Item -Destination (Join-Path $stage 'BrowserExtension')
 Get-ChildItem -LiteralPath $tools -File | Where-Object { $_.Extension -in @('.exe','.dll','.txt','.json') -and $_.Name -notin @('node.exe','NODE-LICENSE.txt') } |
     Copy-Item -Destination (Join-Path $stage 'video-tools')
-Copy-Item -LiteralPath (Join-Path $root 'SwiftFetch/app.ico'), (Join-Path $root 'SwiftFetch/app-icon.png'), (Join-Path $root 'installer/Browser-Setup.html'), (Join-Path $root 'installer/INSTALLATION.txt') -Destination $stage
+Copy-Item -LiteralPath (Join-Path $rust 'KESTREL_Icon_Pack/app/windows/kestrel.ico') -Destination (Join-Path $stage 'app.ico')
+Copy-Item -LiteralPath (Join-Path $rust 'KESTREL_Icon_Pack/app/png/kestrel-256.png') -Destination (Join-Path $stage 'app-icon.png')
+Copy-Item -LiteralPath (Join-Path $root 'installer/Browser-Setup.html'), (Join-Path $root 'installer/INSTALLATION.txt') -Destination $stage
 Copy-Item -LiteralPath (Join-Path $root 'LICENSE') -Destination (Join-Path $stage 'licenses/Flux-LICENSE.txt')
 
-foreach ($required in @('Flux.exe','flux-nmhost.exe','flux-cli.exe','BrowserExtension/manifest.json','video-tools/yt-dlp.exe','video-tools/ffmpeg.exe','video-tools/ffprobe.exe','video-tools/qjs.exe','video-tools/aria2c.exe','video-tools/sources.json','app.ico')) {
+foreach ($required in @('Kestrel.exe','flux-nmhost.exe','flux-cli.exe','BrowserExtension/manifest.json','video-tools/yt-dlp.exe','video-tools/ffmpeg.exe','video-tools/ffprobe.exe','video-tools/qjs.exe','video-tools/aria2c.exe','video-tools/sources.json','app.ico')) {
     if (!(Test-Path -LiteralPath (Join-Path $stage $required))) { throw "Incomplete payload: $required" }
 }
 
@@ -61,12 +63,12 @@ Get-ChildItem -LiteralPath $stage -File -Recurse | ForEach-Object {
     [pscustomobject]@{ path = $_.FullName.Substring($prefix.Length); bytes = $_.Length; sha256 = (Get-FileHash -LiteralPath $_.FullName).Hash.ToLowerInvariant() }
 } | ConvertTo-Json -Depth 3 | Set-Content -LiteralPath (Join-Path $stage 'payload-sha256.json') -Encoding utf8
 $bytes = (Get-ChildItem -LiteralPath $stage -File -Recurse | Measure-Object Length -Sum).Sum
-Write-Output ('Payload: {0:N1} MB (app {1:N1} MB)' -f ($bytes / 1MB), ((Get-Item (Join-Path $stage 'Flux.exe')).Length / 1MB))
+Write-Output ('Payload: {0:N1} MB (app {1:N1} MB)' -f ($bytes / 1MB), ((Get-Item (Join-Path $stage 'Kestrel.exe')).Length / 1MB))
 
 New-Item -ItemType Directory -Path $output -Force | Out-Null
 & $compiler /Q "/DPayloadDir=$stage" "/DOutputDir=$output" "/DAppVersion=$version" "/DExtensionId=$extensionId" (Join-Path $root 'installer/Flux2.iss')
 if ($LASTEXITCODE -ne 0) { throw 'Installer compilation failed.' }
-$installer = Join-Path $output "Flux-Setup-$version-win-x64.exe"
+$installer = Join-Path $output "Kestrel-Setup-$version-win-x64.exe"
 $sha = (Get-FileHash -LiteralPath $installer).Hash.ToLowerInvariant()
 "$sha  $(Split-Path -Leaf $installer)" | Set-Content -LiteralPath "$installer.sha256" -Encoding ascii
 Write-Output ('Installer: {0} ({1:N1} MB)' -f $installer, ((Get-Item $installer).Length / 1MB))

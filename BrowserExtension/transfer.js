@@ -22,7 +22,7 @@ export function sendNative(api, request, timeoutMs = 22000) {
       port?.disconnect();
       if (error) reject(error); else resolve(response);
     };
-    const timer = setTimeout(() => finish(new Error("Flux did not respond. Check the browser bridge installation.")), timeoutMs);
+    const timer = setTimeout(() => finish(new Error("Kestrel did not respond. Check the browser bridge installation.")), timeoutMs);
     try {
       port = api.runtime.connectNative(HOST);
       port.onMessage.addListener(response => {

@@ -2,7 +2,7 @@
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import { onMount } from "svelte";
   import { startDrag } from "@crabnebula/tauri-plugin-drag";
-  import { call, size, exact, applyTheme, type Download, type Settings } from "../lib/api";
+  import { call, size, exact, applyTheme, fitHeight, type Download, type Settings } from "../lib/api";
 
   let { id }: { id: string } = $props();
   let d: Download | null = $state(null);
@@ -15,6 +15,7 @@
     call<Settings>("get_settings").then((s) => { settings = s; applyTheme(s.theme); });
     call<Download | null>("get_download", { id }).then((v) => (d = v));
   });
+  $effect(() => { void d; void error; fitHeight(); });
   async function close() {
     if (dontShow && settings) await call("save_settings", { settings: { ...settings, showCompleteDialog: false } });
     win.close();

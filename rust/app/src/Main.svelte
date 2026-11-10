@@ -32,7 +32,7 @@
     menu = null; message = "Checking for updates…";
     try {
       const info = await call<UpdateInfo>("check_updates");
-      if (info.available) { update = info; message = ""; } else message = `Flux ${info.current} is up to date.`;
+      if (info.available) { update = info; message = ""; } else message = `Kestrel ${info.current} is up to date.`;
     } catch (e) { message = "Update check: " + String(e); }
   }
   async function installUpdate() {
@@ -147,7 +147,7 @@
     const path = await pickFile({ title: "Open torrent file", filters: [{ name: "Torrent files", extensions: ["torrent"] }] });
     if (typeof path === "string") call("open_torrent_file", { path }).catch((e) => (message = String(e)));
   }
-  // A finished row dragged a few pixels leaves Flux as the file itself (to Explorer, a mail…).
+  // A finished row dragged a few pixels leaves Kestrel as the file itself (to Explorer, a mail…).
   let dragFrom: { d: Download; x: number; y: number } | null = null;
   function rowDown(d: Download, e: MouseEvent) {
     if (e.button !== 0) return;
@@ -184,7 +184,7 @@
       if (countdown.seconds <= 0) { clearInterval(timer); const a = countdown.action; countdown = null; call("power_action", { action: a }); }
     }, 1000);
   }
-  const actionName: Record<string, string> = { exit: "Flux will close", sleep: "The computer will sleep", hibernate: "The computer will hibernate", shutdown: "The computer will shut down" };
+  const actionName: Record<string, string> = { exit: "Kestrel will close", sleep: "The computer will sleep", hibernate: "The computer will hibernate", shutdown: "The computer will shut down" };
 
   const menus: Record<string, { label: string; run?: () => void; disabled?: () => boolean; check?: () => boolean; key?: string; sep?: boolean }[]> = {
     Tasks: [
@@ -219,9 +219,9 @@
       { label: "Dark mode", check: () => settings?.theme !== "light", run: () => { if (settings) call("save_settings", { settings: { ...settings, theme: settings.theme === "light" ? "dark" : "light" } }); } },
     ],
     Help: [
-      { label: "Flux on GitHub", run: () => call("open_folder", { path: "https://github.com/AchrafTsouli/flux-downloader" }) },
+      { label: "Kestrel on GitHub", run: () => call("open_folder", { path: "https://github.com/AchrafTsouli/flux-downloader" }) },
       { label: "Check for updates", run: checkUpdates },
-      { label: "About Flux", run: () => { about = true; menu = null; } },
+      { label: "About Kestrel", run: () => { about = true; menu = null; } },
     ],
   };
 </script>
@@ -243,7 +243,7 @@
         {/if}
       </div>
     {/each}
-    <div class="brand"><img src="/logo.png" alt="" width="18" height="18" /><span>FLUX</span></div>
+    <div class="brand"><img src="/logo.png" alt="" width="18" height="18" /><span>KESTREL</span></div>
   </div>
 
   {#if showToolbar}
@@ -258,7 +258,7 @@
       <button class="tool" onclick={() => showWindow("scheduler")}><Icon name="scheduler" /><span>Scheduler</span></button>
       <button class="tool" onclick={() => toggleQueue(currentQueue)} disabled={runningQueues.includes(currentQueue)} title={"Start " + currentQueue}><Icon name="startQueue" /><span>Start Qu…</span></button>
       <button class="tool" onclick={() => toggleQueue(currentQueue)} disabled={!runningQueues.includes(currentQueue)} title={"Stop " + currentQueue}><Icon name="stopQueue" /><span>Stop Qu…</span></button>
-      <button class="tool" onclick={() => { navigator.clipboard?.writeText("Flux, a free download manager: https://github.com/AchrafTsouli/flux-downloader"); message = "Link to Flux copied. Paste it to a friend."; }}><Icon name="share" /><span>Tell a Friend</span></button>
+      <button class="tool" onclick={() => { navigator.clipboard?.writeText("Kestrel, a free download manager: https://github.com/AchrafTsouli/flux-downloader"); message = "Link to Kestrel copied. Paste it to a friend."; }}><Icon name="share" /><span>Tell a Friend</span></button>
     </div>
   {/if}
 
@@ -403,9 +403,9 @@
 {#if crash}
   <div class="scrim" role="presentation">
     <div class="dialog small" role="dialog" aria-labelledby="crash-title">
-      <div class="dialog-title" id="crash-title">Flux closed unexpectedly</div>
+      <div class="dialog-title" id="crash-title">Kestrel closed unexpectedly</div>
       <div class="dialog-body">
-        <p>Flux stopped because of an error last time. Sending the report helps fix it; it opens on GitHub, where you can read and change it before sending.</p>
+        <p>Kestrel stopped because of an error last time. Sending the report helps fix it; it opens on GitHub, where you can read and change it before sending.</p>
         <pre class="report">{crash.text}</pre>
       </div>
       <div class="dialog-actions">
@@ -421,8 +421,8 @@
     <div class="dialog small" role="dialog" aria-labelledby="update-title">
       <div class="dialog-title" id="update-title">Update available</div>
       <div class="dialog-body">
-        <p><b>Flux {update.version}</b> is available (you have {update.current}).</p>
-        <p class="muted">{update.signed ? "Downloads are paused and continue after the update. Flux restarts when it is installed." : "This release is not signed for automatic installation; its download page opens in your browser."}</p>
+        <p><b>Kestrel {update.version}</b> is available (you have {update.current}).</p>
+        <p class="muted">{update.signed ? "Downloads are paused and continue after the update. Kestrel restarts when it is installed." : "This release is not signed for automatic installation; its download page opens in your browser."}</p>
       </div>
       <div class="dialog-actions">
         <button class="btn primary" onclick={installUpdate} disabled={installing}>{installing ? "Downloading…" : update.signed ? "Install now" : "Open download page"}</button>
@@ -435,8 +435,8 @@
 {#if about}
   <div class="scrim" role="presentation" onmousedown={(e) => e.target === e.currentTarget && (about = false)}>
     <div class="dialog small" role="dialog" aria-labelledby="about-title">
-      <div class="dialog-title" id="about-title">About Flux</div>
-      <div class="dialog-body about"><img src="/logo.png" alt="" width="48" height="48" /><div><b>Flux {version}</b><p>Rust engine · Tauri interface · MIT licence</p><p class="muted">github.com/AchrafTsouli/flux-downloader</p></div></div>
+      <div class="dialog-title" id="about-title">About Kestrel</div>
+      <div class="dialog-body about"><img src="/logo.png" alt="" width="48" height="48" /><div><b>Kestrel {version}</b><p>Rust engine · Tauri interface · MIT licence</p><p class="muted">github.com/AchrafTsouli/flux-downloader</p></div></div>
       <div class="dialog-actions"><button class="btn primary" onclick={() => (about = false)}>OK</button></div>
     </div>
   </div>

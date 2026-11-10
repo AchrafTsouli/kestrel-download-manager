@@ -22,7 +22,7 @@ const USAGE: &str = "Flux from the command line
 
 fn app_path() -> PathBuf {
     let dir = std::env::current_exe().ok().and_then(|p| p.parent().map(|d| d.to_path_buf())).unwrap_or_default();
-    ["Flux.exe", "flux.exe", "flux"].iter().map(|n| dir.join(n)).find(|p| p.exists()).unwrap_or_else(|| dir.join("flux"))
+    ["Kestrel.exe", "Flux.exe", "flux.exe", "flux"].iter().map(|n| dir.join(n)).find(|p| p.exists()).unwrap_or_else(|| dir.join("flux"))
 }
 
 /// A random request ID (the bridge's GUID form), so a repeated command never adds twice.
@@ -42,19 +42,19 @@ async fn send(request: &Request, start: bool) -> Result<Response, String> {
                 write_frame(&mut link, request).await.map_err(|e| e.to_string())?;
                 return match tokio::time::timeout(Duration::from_secs(150), read_frame::<Response>(&mut link)).await {
                     Ok(Ok(Some(response))) => Ok(response),
-                    Ok(_) => Err("Flux closed the connection.".into()),
-                    Err(_) => Err("Flux did not answer in time.".into()),
+                    Ok(_) => Err("Kestrel closed the connection.".into()),
+                    Err(_) => Err("Kestrel did not answer in time.".into()),
                 };
             }
             Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => return Err(e.to_string()),
-            Err(_) if !start => return Err("Flux is not running.".into()),
+            Err(_) if !start => return Err("Kestrel is not running.".into()),
             Err(_) => {
                 if !started {
                     started = true;
-                    flux_ipc::start_app(&app_path()).map_err(|_| "Flux was not found beside flux-cli.".to_string())?;
+                    flux_ipc::start_app(&app_path()).map_err(|_| "Kestrel was not found beside flux-cli.".to_string())?;
                 }
                 if tokio::time::Instant::now() >= deadline {
-                    return Err("Flux did not start in time.".into());
+                    return Err("Kestrel did not start in time.".into());
                 }
                 tokio::time::sleep(Duration::from_millis(300)).await;
             }
@@ -115,7 +115,7 @@ async fn main() {
                 _ => println!("Done."),
             },
             Ok(response) => {
-                eprintln!("{}: {}", request.url.as_deref().unwrap_or(command), response.error.unwrap_or_else(|| "Flux refused it.".into()));
+                eprintln!("{}: {}", request.url.as_deref().unwrap_or(command), response.error.unwrap_or_else(|| "Kestrel refused it.".into()));
                 failed = true;
             }
             Err(error) => {

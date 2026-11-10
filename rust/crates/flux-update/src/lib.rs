@@ -82,7 +82,7 @@ pub fn parse(json: &[u8], public_key: &str) -> Result<Release, String> {
 }
 
 fn client(timeout: Duration) -> Result<reqwest::Client, String> {
-    reqwest::Client::builder().timeout(timeout).user_agent("Flux").build().map_err(|e| e.to_string())
+    reqwest::Client::builder().timeout(timeout).user_agent("Kestrel").build().map_err(|e| e.to_string())
 }
 
 async fn read(client: &reqwest::Client, url: &str, limit: usize) -> Result<Vec<u8>, String> {
@@ -118,7 +118,7 @@ pub async fn download_installer(release: &Release) -> Result<PathBuf, String> {
     }
     let folder = std::env::temp_dir().join(format!("flux-update-{}", std::process::id()));
     std::fs::create_dir_all(&folder).map_err(|e| e.to_string())?;
-    let path = folder.join(format!("Flux-Setup-{}.exe", release.version));
+    let path = folder.join(format!("Kestrel-Setup-{}.exe", release.version));
     std::fs::write(&path, installer).map_err(|e| e.to_string())?;
     Ok(path)
 }
@@ -130,7 +130,7 @@ mod tests {
     /// The feed Flux 1.0.0 was published with, signed by the release key.
     const FEED_1_0_0: &str = r#"{
   "version": "1.0.0",
-  "url": "https://github.com/AchrafTsouli/flux-downloader/releases/download/v1.0.0/Flux-Setup-1.0.0-win-x64.exe",
+  "url": "https://github.com/AchrafTsouli/flux-downloader/releases/download/v1.0.0/Kestrel-Setup-1.0.0-win-x64.exe",
   "sha256": "a1018deddc275afa661ebef81374c896fc7c11607bd6a0d2001e2a9d74f33a6f",
   "signature": "RcU3GgN25plSFXQ2Ls8k5obeidfZRLjElEBZ5RgifskFarIe4TyMYcxJ2j2+X01MPHVeebDHSVHjJFUFqloJMQ=="
 }"#;
@@ -144,7 +144,7 @@ mod tests {
 
     #[test]
     fn any_change_breaks_the_signature() {
-        for (from, to) in [("1.0.0\"", "1.0.1\""), ("v1.0.0/Flux", "v1.0.0/Fluxx"), ("a1018d", "b1018d")] {
+        for (from, to) in [("1.0.0\"", "1.0.1\""), ("v1.0.0/Kestrel", "v1.0.0/Fluxx"), ("a1018d", "b1018d")] {
             let tampered = FEED_1_0_0.replacen(from, to, 1);
             assert!(parse(tampered.as_bytes(), PUBLIC_KEY).unwrap_err().contains("not valid"), "{from}");
         }

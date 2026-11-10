@@ -95,7 +95,7 @@ impl Tools {
 
     fn path(&self, tool: &str) -> Result<PathBuf, String> {
         if !self.available() {
-            return Err("The video tools are missing. Reinstall Flux to restore them.".into());
+            return Err("The video tools are missing. Reinstall Kestrel to restore them.".into());
         }
         // A verified newer yt-dlp replaces the aging bundled copy; FFmpeg and QuickJS stay bundled.
         if tool == "yt-dlp"
