@@ -1,0 +1,15 @@
+[package]
+name = "release-signer"
+description = "Signs Kestrel's update feed (version.json) with the release key; replaces Flux 1.x's C# UpdateSigner"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+flux-update.workspace = true
+flux-store.workspace = true
+p256 = { version = "0.13", default-features = false, features = ["ecdsa", "pkcs8", "std"] }
+base64 = "0.22"
+sha2.workspace = true
+serde_json.workspace = true

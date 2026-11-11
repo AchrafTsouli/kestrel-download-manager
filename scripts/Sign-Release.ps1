@@ -1,6 +1,5 @@
-# Writes a signed version.json for an installer. Upload both files to the release, then set the
-# app's update feed (Options -> View) to the version.json URL, e.g.
-#   https://github.com/<owner>/<repo>/releases/latest/download/version.json
+# Writes a signed version.json for an installer (with tools/release-signer, in Rust). Upload both
+# files to the release; installed copies read .../releases/latest/download/version.json.
 param(
   [Parameter(Mandatory)][string]$Installer,
   [Parameter(Mandatory)][string]$DownloadUrl,
@@ -9,6 +8,7 @@ param(
   [string]$KeyPath = (Join-Path $env:LOCALAPPDATA 'ApexRelease\update-signing.key')
 )
 $root = Split-Path -Parent $PSScriptRoot
-$env:DOTNET_CLI_HOME = Join-Path $root '.dotnet-home'
-dotnet run --project (Join-Path $root 'tools/UpdateSigner/UpdateSigner.csproj') -- sign $KeyPath (Resolve-Path $Installer) $DownloadUrl $Version $Output
+Push-Location (Join-Path $root 'rust')
+try { cargo run -q --release -p release-signer -- sign $KeyPath (Resolve-Path $Installer) $DownloadUrl $Version $Output }
+finally { Pop-Location }
 exit $LASTEXITCODE
