@@ -14,6 +14,7 @@ mod system;
 mod torrents;
 mod updates;
 mod zippreview;
+mod fileicon;
 
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -235,6 +236,14 @@ async fn offer_url(app: AppHandle, url: String, file_name: Option<String>, login
 async fn zip_preview(windows: State<'_, Windows>, id: String) -> Result<Vec<zippreview::Entry>, String> {
     let request = windows.pending.lock().unwrap().get(&id).map(|p| p.request.clone()).ok_or("This download was already added or cancelled.")?;
     zippreview::list(&request.url, request.session.as_ref()).await
+}
+/// The file's own icon for the list (a program's logo once it is downloaded), as a data URL.
+#[tauri::command]
+async fn file_icon(manager: Mgr<'_>, id: String) -> Result<Option<String>, String> {
+    let Some(record) = manager.record(&id) else { return Ok(None) };
+    let done = record.status == model::Status::Completed && record.destination.exists();
+    let path = record.destination.clone();
+    tauri::async_runtime::spawn_blocking(move || fileicon::data_url(&path, done)).await.map_err(|e| e.to_string())
 }
 #[tauri::command]
 fn move_in_queue(manager: Mgr, id: String, delta: i32) {
@@ -1014,7 +1023,7 @@ pub fn run() {
             list_downloads, get_download, get_settings, save_settings, offer_url, get_pending, confirm_pending, cancel_pending,
             probe_video, video_exact_cut, confirm_video, video_as_file, load_torrent, confirm_torrent, open_torrent_file, check_updates, install_update, drag_item, grab_site, run_waiting, register_browsers, test_browsers, set_after_complete, get_after_complete, open_with, to_background, crash_reports, dismiss_crash, report_crash,
             add_downloads, pause_downloads, resume_downloads, pause_all, resume_all, remove_downloads, remove_completed,
-            rename_download, redownload, zip_preview, move_in_queue, write_link_list, read_link_list, set_speed_limit, set_queue, enqueue, start_queue, stop_queue, running_queues,
+            rename_download, redownload, zip_preview, file_icon, move_in_queue, write_link_list, read_link_list, set_speed_limit, set_queue, enqueue, start_queue, stop_queue, running_queues,
             open_file, show_in_folder, open_folder, show_progress, show_window, power_action, exit_app, app_version
         ])
         .run(tauri::generate_context!())

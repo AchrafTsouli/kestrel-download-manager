@@ -1627,6 +1627,7 @@ dependencies = [
  "flux-store",
  "flux-torrent",
  "flux-update",
+ "png",
  "regex",
  "reqwest 0.12.28",
  "serde",

@@ -4,6 +4,7 @@
   import { startDrag } from "@crabnebula/tauri-plugin-drag";
   import { onMount } from "svelte";
   import Icon from "./lib/Icon.svelte";
+  import FileIcon from "./lib/FileIcon.svelte";
   import { call, categories, running, resumable, size, percent, timeLeft, stamp, statusText, statusClass, applyTheme, type Download, type Settings, type AfterQueue } from "./lib/api";
 
   let downloads: Download[] = $state([]);
@@ -55,9 +56,7 @@
   const queues = $derived(settings?.queues ?? []);
   // The list's columns, like IDM's; each can be filtered from its header.
   type Column = { key: string; label: string; width?: number; align?: string; text: (d: Download) => string };
-  const sourceName = (d: Download) => (d.kind === "torrent" ? "Torrent" : d.kind === "video" ? "Video" : "Web");
   const columns: Column[] = [
-    { key: "source", label: "Source", width: 76, text: sourceName },
     { key: "name", label: "File Name", text: (d) => d.name },
     { key: "q", label: "Q", width: 24, align: "c", text: () => "" },
     { key: "size", label: "Size", width: 86, align: "r", text: (d) => size(d.total) },
@@ -483,8 +482,7 @@
           <tbody>
             {#each shown as d (d.id)}
               <tr class:sel={selected.has(d.id)} onmousedown={(e) => rowDown(d, e)} onmousemove={rowMove} onmouseup={() => (dragFrom = null)} ondblclick={() => activate(d)} oncontextmenu={(e) => rowMenu(d, e)} title={d.error ?? d.url}>
-                <td><span class="source {d.kind}">{sourceName(d)}</span></td>
-                <td class="name"><Icon name={d.category} size={15} /><span>{d.name}</span></td>
+                <td class="name"><FileIcon {d} /><span>{d.name}</span></td>
                 <td class="c">{d.status === "Queued" ? "⏱" : ""}</td>
                 <td class="r">{size(d.total)}</td>
                 <td><span class="status {statusClass(d)}">{statusText(d)}</span></td>
@@ -729,9 +727,6 @@
   .grid td { height: 21px; padding: 0 6px; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .grid tr.filler td { height: 21px; }
   .grid tbody tr.filler:hover { background: transparent; }
-  .source { display: inline-block; min-width: 46px; padding: 0 7px; border-radius: 999px; font-size: 11px; font-weight: 600; line-height: 16px; text-align: center; color: #fff; background: #2e9e57; }
-  .source.video { background: #c0392b; }
-  .source.torrent { background: #7c4dcc; }
   .grid tbody tr:nth-child(even) { background: var(--row-alt); }
   .grid tbody tr:hover { background: color-mix(in srgb, var(--selection) 45%, transparent); }
   .grid tbody tr.sel { background: var(--selection); color: var(--selection-text); }
