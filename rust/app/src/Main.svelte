@@ -53,6 +53,42 @@
   let message = $state("Ready.");
 
   const queues = $derived(settings?.queues ?? []);
+  // The list's columns, like IDM's; each can be filtered from its header.
+  type Column = { key: string; label: string; width?: number; align?: string; text: (d: Download) => string };
+  const sourceName = (d: Download) => (d.kind === "torrent" ? "Torrent" : d.kind === "video" ? "Video" : "Web");
+  const columns: Column[] = [
+    { key: "source", label: "Source", width: 76, text: sourceName },
+    { key: "name", label: "File Name", text: (d) => d.name },
+    { key: "q", label: "Q", width: 24, align: "c", text: () => "" },
+    { key: "size", label: "Size", width: 86, align: "r", text: (d) => size(d.total) },
+    { key: "status", label: "Status", width: 90, text: (d) => statusText(d) },
+    { key: "left", label: "Time left", width: 80, align: "r", text: (d) => timeLeft(d) },
+    { key: "rate", label: "Transfer rate", width: 96, align: "r", text: (d) => (d.bytesPerSecond > 0 ? size(d.bytesPerSecond) + "/s" : "") },
+    { key: "last", label: "Last Try…", width: 118, text: (d) => stamp(d.lastTryMs) },
+    { key: "added", label: "Added", width: 118, text: (d) => stamp(d.addedMs) },
+    { key: "desc", label: "Description", width: 110, text: (d) => d.description },
+  ];
+  let filters: Record<string, string> = $state({});
+  // Column widths dragged from the header edges, kept between sessions.
+  let widths: Record<string, number> = $state((() => { try { return JSON.parse(localStorage.getItem("kestrel.columns") || "{}"); } catch { return {}; } })());
+  const widthOf = (c: Column) => widths[c.key] ?? c.width;
+  function startResize(e: PointerEvent, c: Column) {
+    e.preventDefault(); e.stopPropagation();
+    const th = (e.currentTarget as HTMLElement).closest("th") as HTMLElement;
+    const from = e.clientX, start = th.offsetWidth;
+    const move = (m: PointerEvent) => { widths[c.key] = Math.max(c.key === "name" ? 80 : 34, Math.round(start + m.clientX - from)); };
+    const up = () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); try { localStorage.setItem("kestrel.columns", JSON.stringify(widths)); } catch {} };
+    window.addEventListener("pointermove", move); window.addEventListener("pointerup", up);
+  }
+  const tableWidth = $derived(columns.reduce((sum, c) => sum + (widthOf(c) ?? 150), 0));
+  let filterOpen: string | null = $state(null);
+  const shown = $derived.by(() => {
+    const active = columns.filter((c) => filters[c.key]?.trim());
+    if (!active.length) return visible;
+    return visible.filter((d) => active.every((c) => c.text(d).toLowerCase().includes(filters[c.key].trim().toLowerCase())));
+  });
+  let gridHeight = $state(0);
+  const fillerRows = $derived(Math.max(0, Math.ceil((gridHeight - 25) / 22) - shown.length));
   const recentAddresses = $derived([...new Set([...downloads].sort((a, b) => b.addedMs - a.addedMs).map((d) => d.url))].slice(0, 20));
   function inView(d: Download, key: string) {
     if (key === "all") return true;
@@ -97,7 +133,7 @@
       listen("open-add", () => openAdd()),
       listen<[string, AfterQueue]>("queue-finished", ({ payload }) => startCountdown(payload[0], payload[1])),
     ];
-    const close = (e: MouseEvent) => { if (!(e.target as HTMLElement).closest(".menubar, .context")) { menu = null; context = null; queueMenu = false; } };
+    const close = (e: MouseEvent) => { if (!(e.target as HTMLElement).closest(".filter-pop, .funnel")) filterOpen = null; if (!(e.target as HTMLElement).closest(".menubar, .context")) { menu = null; context = null; queueMenu = false; } };
     window.addEventListener("mousedown", close);
     window.addEventListener("keydown", keys);
     return () => { subscriptions.forEach((s) => s.then((f) => f())); window.removeEventListener("mousedown", close); window.removeEventListener("keydown", keys); };
@@ -417,27 +453,55 @@
         <h1>{viewTitle}</h1>
         <input class="search" type="search" placeholder="Search downloads…" bind:value={search} aria-label="Search downloads" />
       </div>
-      <div class="grid-wrap">
-        <table class="grid">
-          <colgroup><col /><col style="width:26px" /><col style="width:84px" /><col style="width:96px" /><col style="width:80px" /><col style="width:96px" /><col style="width:100px" /><col style="width:150px" /><col style="width:150px" /></colgroup>
-          <thead><tr><th>File Name</th><th class="c">Q</th><th class="r">Size</th><th>Status</th><th class="r">Time left</th><th class="r">Transfer rate</th><th>Last Try…</th><th>Description</th><th>Progress</th></tr></thead>
+      <div class="grid-wrap" bind:clientHeight={gridHeight}>
+        <table class="grid" style:min-width="{tableWidth}px">
+          <colgroup>{#each columns as c}<col style:width={widthOf(c) ? widthOf(c) + "px" : null} />{/each}</colgroup>
+          <thead>
+            <tr>
+              {#each columns as c}
+                <th class={c.align}>
+                  <span class="th">
+                    <span class="th-label">{c.label}</span>
+                    {#if c.key !== "q"}
+                      <button class="funnel" class:on={!!filters[c.key]} onclick={(e) => { e.stopPropagation(); filterOpen = filterOpen === c.key ? null : c.key; }} title={filters[c.key] ? `Filtered: ${filters[c.key]}` : `Filter by ${c.label}`} aria-label={`Filter by ${c.label}`}>
+                        <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M0.5 1h9L6 5.2V9L4 8V5.2z" /></svg>
+                      </button>
+                    {/if}
+                  </span>
+                  <span class="resize" role="separator" aria-orientation="vertical" aria-label={`Resize ${c.label}`} onpointerdown={(e) => startResize(e, c)} ondblclick={() => { delete widths[c.key]; try { localStorage.setItem("kestrel.columns", JSON.stringify(widths)); } catch {} }}></span>
+                  {#if filterOpen === c.key}
+                    <div class="filter-pop" role="dialog" aria-label={`Filter by ${c.label}`} onmousedown={(e) => e.stopPropagation()}>
+                      <!-- svelte-ignore a11y_autofocus -->
+                      <input class="input" placeholder="Contains…" bind:value={filters[c.key]} autofocus onkeydown={(e) => (e.key === "Enter" || e.key === "Escape") && (filterOpen = null)} />
+                      <button class="btn small" onclick={() => { filters[c.key] = ""; filterOpen = null; }}>Clear</button>
+                    </div>
+                  {/if}
+                </th>
+              {/each}
+            </tr>
+          </thead>
           <tbody>
-            {#each visible as d (d.id)}
+            {#each shown as d (d.id)}
               <tr class:sel={selected.has(d.id)} onmousedown={(e) => rowDown(d, e)} onmousemove={rowMove} onmouseup={() => (dragFrom = null)} ondblclick={() => activate(d)} oncontextmenu={(e) => rowMenu(d, e)} title={d.error ?? d.url}>
+                <td><span class="source {d.kind}">{sourceName(d)}</span></td>
                 <td class="name"><Icon name={d.category} size={15} /><span>{d.name}</span></td>
                 <td class="c">{d.status === "Queued" ? "⏱" : ""}</td>
                 <td class="r">{size(d.total)}</td>
                 <td><span class="status {statusClass(d)}">{statusText(d)}</span></td>
                 <td class="r">{timeLeft(d)}</td>
-                <td class="r">{d.bytesPerSecond > 0 ? size(d.bytesPerSecond) + "/s" : "—"}</td>
+                <td class="r">{d.bytesPerSecond > 0 ? size(d.bytesPerSecond) + "/s" : ""}</td>
                 <td>{stamp(d.lastTryMs)}</td>
+                <td>{stamp(d.addedMs)}</td>
                 <td class="desc">{d.description}</td>
-                <td><div class="progress"><div class="bar"><i style:width="{percent(d)}%"></i></div><span>{Math.floor(percent(d))}%</span></div></td>
               </tr>
+            {/each}
+            <!-- Like IDM: the empty grid continues below the downloads. -->
+            {#each { length: fillerRows } as _}
+              <tr class="filler" aria-hidden="true">{#each columns as _c}<td></td>{/each}</tr>
             {/each}
           </tbody>
         </table>
-        {#if visible.length === 0}
+        {#if shown.length === 0}
           <div class="empty">{downloads.length === 0 ? "No downloads yet. Click Add URL, or press Ctrl+N, and paste a link." : "Nothing in this view."}</div>
         {/if}
       </div>
@@ -647,9 +711,27 @@
   .list-head h1 { margin: 0; font-size: 12px; font-weight: 600; }
   .search { width: 200px; height: 22px; padding: 0 8px; border: 1px solid var(--line); border-radius: 4px; background: var(--bg); color: var(--text); font: inherit; user-select: text; }
   .grid-wrap { overflow: auto; position: relative; }
-  .grid { width: 100%; min-width: 900px; border-collapse: collapse; table-layout: fixed; font-variant-numeric: tabular-nums; }
-  .grid th { position: sticky; top: 0; z-index: 1; height: 24px; padding: 0 8px; text-align: left; font-weight: 400; color: var(--muted); background: var(--surface); border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .grid td { height: 21px; padding: 0 8px; border-right: 1px solid color-mix(in srgb, var(--line) 55%, transparent); border-bottom: 1px solid color-mix(in srgb, var(--line) 55%, transparent); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .grid { width: 100%; border-collapse: collapse; table-layout: fixed; font-variant-numeric: tabular-nums; }
+  .grid th { position: sticky; top: 0; z-index: 2; height: 25px; padding: 0 4px 0 6px; text-align: left; font-weight: 600; color: var(--text); background: var(--chrome); border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); white-space: nowrap; }
+  .th { display: flex; align-items: center; gap: 4px; min-width: 0; }
+  .th-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .grid th.r .th-label { text-align: right; }
+  .grid th.c .th-label { text-align: center; }
+  .resize { position: absolute; top: 0; right: -3px; z-index: 3; width: 6px; height: 100%; cursor: col-resize; }
+  .resize:hover { background: color-mix(in srgb, var(--accent) 45%, transparent); }
+  .funnel { flex: none; display: grid; place-items: center; width: 16px; height: 16px; padding: 0; border: 0; border-radius: 3px; background: transparent; color: var(--muted); cursor: default; }
+  .funnel svg { fill: currentColor; }
+  .funnel:hover { background: var(--raised); color: var(--text); }
+  .funnel.on { color: var(--accent); }
+  .filter-pop { position: absolute; top: 26px; left: 0; z-index: 5; display: flex; gap: 6px; width: 240px; padding: 6px; background: var(--menu); border: 1px solid var(--line); border-radius: 6px; box-shadow: 0 10px 28px rgb(0 0 0 / 0.35); font-weight: 400; }
+  .filter-pop .input { flex: 1; min-width: 0; }
+  .grid th { position: sticky; }
+  .grid td { height: 21px; padding: 0 6px; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .grid tr.filler td { height: 21px; }
+  .grid tbody tr.filler:hover { background: transparent; }
+  .source { display: inline-block; min-width: 46px; padding: 0 7px; border-radius: 999px; font-size: 11px; font-weight: 600; line-height: 16px; text-align: center; color: #fff; background: #2e9e57; }
+  .source.video { background: #c0392b; }
+  .source.torrent { background: #7c4dcc; }
   .grid tbody tr:nth-child(even) { background: var(--row-alt); }
   .grid tbody tr:hover { background: color-mix(in srgb, var(--selection) 45%, transparent); }
   .grid tbody tr.sel { background: var(--selection); color: var(--selection-text); }
