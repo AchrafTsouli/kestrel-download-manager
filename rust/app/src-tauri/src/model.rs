@@ -235,6 +235,8 @@ pub struct Settings {
     pub speed_limit: u64,
     /// The last limit in force, brought back by "Speed limiter > Turn on".
     pub last_speed_limit: u64,
+    /// "Add the browser extension" was shown once, on the first start.
+    pub extension_guide_shown: bool,
     pub show_start_dialog: bool,
     pub show_progress_window: bool,
     pub show_complete_dialog: bool,
@@ -406,6 +408,7 @@ impl Default for Settings {
             connections: 8,
             speed_limit: 0,
             last_speed_limit: 0,
+            extension_guide_shown: false,
             show_start_dialog: true,
             show_progress_window: true,
             show_complete_dialog: true,

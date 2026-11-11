@@ -16,13 +16,14 @@ import Batch from "./windows/Batch.svelte";
 import Video from "./windows/Video.svelte";
 import Torrent from "./windows/Torrent.svelte";
 import Grabber from "./windows/Grabber.svelte";
+import Extension from "./windows/Extension.svelte";
 
 // Every window loads this page; its label says which screen it is ("progress-<id>", "options", …).
 const label = getCurrentWindow().label;
 const [kind, ...rest] = label.split("-");
 const id = rest.join("-");
 const target = document.getElementById("app")!;
-const screens: Record<string, any> = { progress: Progress, complete: Complete, start: Start, options: Options, scheduler: Scheduler, batch: Batch, video: Video, torrent: Torrent, grabber: Grabber };
+const screens: Record<string, any> = { progress: Progress, complete: Complete, start: Start, options: Options, scheduler: Scheduler, batch: Batch, video: Video, torrent: Torrent, grabber: Grabber, extension: Extension };
 // The language is set before the window is drawn, and follows Options while it is open.
 const win = getCurrentWindow();
 invoke<{ language: string; interfaceSize: number; dateOrder: string; clock: string }>("get_settings")

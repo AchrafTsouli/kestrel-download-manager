@@ -16,6 +16,7 @@ mod updates;
 mod zippreview;
 mod fileicon;
 mod exeicon;
+mod browsers;
 
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -252,6 +253,15 @@ async fn pending_icon(windows: State<'_, Windows>, id: String) -> Result<Option<
 #[tauri::command]
 async fn type_icon(name: String) -> Result<Option<String>, String> {
     tauri::async_runtime::spawn_blocking(move || fileicon::data_url(std::path::Path::new(&name), false)).await.map_err(|e| e.to_string())
+}
+/// "Add the browser extension": the browsers found, their extensions page, the extension folder.
+#[tauri::command]
+fn extension_setup() -> serde_json::Value {
+    serde_json::json!({ "browsers": browsers::installed(), "folder": browsers::extension_folder().map(|p| p.to_string_lossy().into_owned()) })
+}
+#[tauri::command]
+fn open_extensions_page(browser: String) -> Result<(), String> {
+    browsers::open_extensions_page(&browser)
 }
 /// The file's own icon for the list (a program's logo once it is downloaded), as a data URL.
 #[tauri::command]
@@ -643,6 +653,7 @@ async fn show_window(app: AppHandle, name: String) -> Result<(), String> {
         "scheduler" => open_window(&app, "scheduler", "Scheduler", 700.0, 580.0, true),
         "batch" => open_window(&app, "batch", "Add batch download", 560.0, 420.0, true),
         "grabber" => open_window(&app, "grabber", "Site grabber", 640.0, 540.0, true),
+        "extension" => open_window(&app, "extension", "Add the browser extension", 600.0, 470.0, false),
         _ => show_main(&app),
     }
     Ok(())
@@ -997,6 +1008,17 @@ pub fn run() {
             let data_dir = flux_store::default_directory();
             let manager = Manager::open(handle.clone(), &data_dir).map_err(Box::<dyn std::error::Error>::from)?;
             app.manage(manager.clone());
+            // The first start: how to add the browser extension (until it is in the stores).
+            if !manager.settings().extension_guide_shown {
+                let mut settings = manager.settings();
+                settings.extension_guide_shown = true;
+                let _ = manager.save_settings(settings);
+                let shower = handle.clone();
+                tauri::async_runtime::spawn(async move {
+                    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                    open_window(&shower, "extension", "Add the browser extension", 600.0, 470.0, false);
+                });
+            }
             // Scheduler: "Start download on Kestrel startup".
             for queue in manager.settings().queues.iter().filter(|q| q.start_on_launch) {
                 manager.start_queue(&queue.name);
@@ -1059,7 +1081,7 @@ pub fn run() {
             list_downloads, get_download, get_settings, save_settings, offer_url, get_pending, confirm_pending, cancel_pending,
             probe_video, video_exact_cut, confirm_video, video_as_file, load_torrent, confirm_torrent, open_torrent_file, check_updates, install_update, drag_item, grab_site, run_waiting, register_browsers, test_browsers, set_after_complete, get_after_complete, open_with, to_background, crash_reports, dismiss_crash, report_crash,
             add_downloads, pause_downloads, resume_downloads, pause_all, resume_all, remove_downloads, remove_completed,
-            rename_download, redownload, zip_preview, file_icon, pending_icon, type_icon, move_in_queue, write_link_list, read_link_list, set_speed_limit, set_queue, enqueue, start_queue, stop_queue, running_queues,
+            rename_download, redownload, zip_preview, extension_setup, open_extensions_page, file_icon, pending_icon, type_icon, move_in_queue, write_link_list, read_link_list, set_speed_limit, set_queue, enqueue, start_queue, stop_queue, running_queues,
             open_file, show_in_folder, open_folder, show_progress, show_window, power_action, exit_app, app_version
         ])
         .run(tauri::generate_context!())

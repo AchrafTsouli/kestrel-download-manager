@@ -363,6 +363,7 @@
     ],
     Help: [
       { label: "Help contents", run: () => web(`${HOME}#readme`) },
+      { label: "Add the browser extension…", run: () => showWindow("extension") },
       { label: "Keyboard shortcuts", run: () => { shortcuts = true; menu = null; } },
       { label: "Home page", sep: true, run: () => web(HOME) },
       { label: "Report a problem", run: () => web(`${HOME}/issues/new`) },

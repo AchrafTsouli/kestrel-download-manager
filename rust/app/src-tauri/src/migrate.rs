@@ -394,6 +394,7 @@ mod seed {
         settings.show_progress_window = false;
         settings.show_complete_dialog = false;
         settings.auto_check_updates = false;
+        settings.extension_guide_shown = true;
         settings.auto_update_tools = false;
         settings.monitor_clipboard = false;
         if std::env::var_os("FLUX_TEST_DIALOGS").is_some() {

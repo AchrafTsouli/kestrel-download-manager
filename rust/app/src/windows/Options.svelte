@@ -89,6 +89,7 @@
             <div class="line">
               <button class="btn" onclick={async () => { try { error = ""; bridgeNote = await call<string>("register_browsers"); checks = await call("test_browsers"); } catch (e) { error = String(e); } }}>Connect browsers</button>
               <button class="btn" onclick={async () => (checks = await call("test_browsers"))}>Test browser integration...</button>
+              <button class="btn" onclick={() => call("show_window", { name: "extension" })}>Add the extension…</button>
             </div>
             {#if bridgeNote}<p class="note">{bridgeNote}</p>{/if}
             {#if checks.length}
