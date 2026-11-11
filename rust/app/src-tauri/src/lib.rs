@@ -245,6 +245,11 @@ async fn pending_icon(windows: State<'_, Windows>, id: String) -> Result<Option<
     use base64::Engine;
     Ok(exeicon::remote(&request.url, request.session.as_ref()).await.map(|ico| format!("data:image/x-icon;base64,{}", base64::engine::general_purpose::STANDARD.encode(ico))))
 }
+/// The icon Windows shows for a type of file (WinRAR's for .rar…), by its name: like Explorer and MDM.
+#[tauri::command]
+async fn type_icon(name: String) -> Result<Option<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || fileicon::data_url(std::path::Path::new(&name), false)).await.map_err(|e| e.to_string())
+}
 /// The file's own icon for the list (a program's logo once it is downloaded), as a data URL.
 #[tauri::command]
 async fn file_icon(manager: Mgr<'_>, id: String) -> Result<Option<String>, String> {
@@ -1050,7 +1055,7 @@ pub fn run() {
             list_downloads, get_download, get_settings, save_settings, offer_url, get_pending, confirm_pending, cancel_pending,
             probe_video, video_exact_cut, confirm_video, video_as_file, load_torrent, confirm_torrent, open_torrent_file, check_updates, install_update, drag_item, grab_site, run_waiting, register_browsers, test_browsers, set_after_complete, get_after_complete, open_with, to_background, crash_reports, dismiss_crash, report_crash,
             add_downloads, pause_downloads, resume_downloads, pause_all, resume_all, remove_downloads, remove_completed,
-            rename_download, redownload, zip_preview, file_icon, pending_icon, move_in_queue, write_link_list, read_link_list, set_speed_limit, set_queue, enqueue, start_queue, stop_queue, running_queues,
+            rename_download, redownload, zip_preview, file_icon, pending_icon, type_icon, move_in_queue, write_link_list, read_link_list, set_speed_limit, set_queue, enqueue, start_queue, stop_queue, running_queues,
             open_file, show_in_folder, open_folder, show_progress, show_window, power_action, exit_app, app_version
         ])
         .run(tauri::generate_context!())

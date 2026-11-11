@@ -26,14 +26,24 @@
   type ZipEntry = { name: string; size: number; packed: number; modified: string; folder: boolean };
   let preview: ZipEntry[] | null = $state(null);
   let previewing = $state(false);
-  // A program's own logo, read from the server before it is downloaded (like IDM).
+  // The file's icon: a program's own logo read from the server (like IDM); for anything else the
+  // icon Windows shows for its type (WinRAR's for .rar, VLC's for .mp4…), like Explorer and MDM.
   let logo: string | null = $state(null);
+  let typeIcon: string | null = $state(null);
   let logoFor = "";
+  let typeFor = "";
+  const extension = $derived((fileName.match(/\.[^.\\/]+$/)?.[0] ?? "").toLowerCase());
   $effect(() => {
-    if (!pending || !/\.exe$/i.test(fileName) || logoFor === pending.request.url) return;
-    logoFor = pending.request.url;
-    call<string | null>("pending_icon", { id }).then((u) => (logo = u)).catch(() => {});
+    if (pending && extension === ".exe" && logoFor !== pending.request.url) {
+      logoFor = pending.request.url;
+      call<string | null>("pending_icon", { id }).then((u) => (logo = u)).catch(() => {});
+    }
+    if (extension && typeFor !== extension) {
+      const ext = (typeFor = extension);
+      call<string | null>("type_icon", { name: "file" + ext }).then((u) => { if (typeFor === ext) typeIcon = u; }).catch(() => {});
+    }
   });
+  const shownIcon = $derived(extension === ".exe" && logo ? logo : typeIcon);
   const isZip = $derived(/\.zip$/i.test(fileName));
   async function showPreview() {
     previewing = true; error = "";
@@ -109,7 +119,7 @@
         <button class="btn plus" onclick={() => call("show_window", { name: "options" })} title="Categories and their folders (Options > Save to)" aria-label="Category settings">+</button>
       </div>
       <div class="side">
-        {#if logo && /\.exe$/i.test(fileName)}<img src={logo} alt="" width="40" height="40" />{:else}<Icon name={category} size={40} />{/if}
+        {#if shownIcon}<img src={shownIcon} alt="" width="40" height="40" />{:else}<Icon name={category} size={40} />{/if}
         <b title={total != null ? `${total.toLocaleString()} bytes` : ""}>{checking ? "Checking…" : total != null ? size(total) : "Unknown"}</b>
         <button class="btn preview" onclick={showPreview} disabled={!isZip || checking || previewing} title={isZip ? "See the files inside this archive" : "Preview is for .zip archives"}>{previewing ? "Reading…" : "Preview"}</button>
       </div>
