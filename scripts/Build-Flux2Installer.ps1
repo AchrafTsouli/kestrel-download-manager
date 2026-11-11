@@ -49,6 +49,21 @@ Copy-Item -LiteralPath (Join-Path $rust 'KESTREL_Icon_Pack/app/png/kestrel-256.p
 Copy-Item -LiteralPath (Join-Path $root 'installer/Browser-Setup.html'), (Join-Path $root 'installer/INSTALLATION.txt') -Destination $stage
 Copy-Item -LiteralPath (Join-Path $root 'LICENSE') -Destination (Join-Path $stage 'licenses/Flux-LICENSE.txt')
 
+# Code signing (optional): set KESTREL_SIGN_THUMBPRINT to the SHA-1 thumbprint of a code-signing
+# certificate in your Windows certificate store (a Certum token, an OV/EV certificate…). Without it the
+# build is unsigned and Windows SmartScreen warns about an unknown publisher.
+$signThumbprint = $env:KESTREL_SIGN_THUMBPRINT
+$timestamp = if ($env:KESTREL_SIGN_TIMESTAMP) { $env:KESTREL_SIGN_TIMESTAMP } else { 'http://timestamp.digicert.com' }
+function Sign-Files([string[]]$Paths) {
+    if (!$signThumbprint) { return }
+    $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\signtool.exe" -ErrorAction SilentlyContinue | Sort-Object FullName -Descending | Select-Object -First 1
+    if (!$signtool) { throw 'signtool.exe not found: install the Windows SDK (Signing Tools).' }
+    & $signtool.FullName sign /sha1 $signThumbprint /fd sha256 /tr $timestamp /td sha256 /d 'Kestrel Download Manager' @Paths
+    if ($LASTEXITCODE -ne 0) { throw 'Code signing failed.' }
+}
+Sign-Files @((Join-Path $stage 'Kestrel.exe'), (Join-Path $stage 'flux-nmhost.exe'), (Join-Path $stage 'flux-cli.exe'))
+if (!$signThumbprint) { Write-Output 'Not signed (set KESTREL_SIGN_THUMBPRINT to sign).' }
+
 foreach ($required in @('Kestrel.exe','flux-nmhost.exe','flux-cli.exe','BrowserExtension/manifest.json','video-tools/yt-dlp.exe','video-tools/ffmpeg.exe','video-tools/ffprobe.exe','video-tools/qjs.exe','video-tools/aria2c.exe','video-tools/sources.json','app.ico')) {
     if (!(Test-Path -LiteralPath (Join-Path $stage $required))) { throw "Incomplete payload: $required" }
 }
@@ -69,6 +84,7 @@ New-Item -ItemType Directory -Path $output -Force | Out-Null
 & $compiler /Q "/DPayloadDir=$stage" "/DOutputDir=$output" "/DAppVersion=$version" "/DExtensionId=$extensionId" (Join-Path $root 'installer/Flux2.iss')
 if ($LASTEXITCODE -ne 0) { throw 'Installer compilation failed.' }
 $installer = Join-Path $output "Kestrel-Setup-$version-win-x64.exe"
+Sign-Files @($installer)
 $sha = (Get-FileHash -LiteralPath $installer).Hash.ToLowerInvariant()
 "$sha  $(Split-Path -Leaf $installer)" | Set-Content -LiteralPath "$installer.sha256" -Encoding ascii
 Write-Output ('Installer: {0} ({1:N1} MB)' -f $installer, ((Get-Item $installer).Length / 1MB))
