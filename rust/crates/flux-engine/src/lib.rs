@@ -503,15 +503,29 @@ impl Engine {
 
     async fn worker(&self, job: &Job, plan: &Mutex<Plan>, part: &file::PartFile, running: &AtomicUsize, written: &AtomicU64, stop: &CancellationToken) -> Result<()> {
         let max_segments = if self.host_limits.limit_for(&job.url).is_some() { job.connections.max(1) } else { self.options.max_segments };
+        // Connections cut in a row on this worker without its part moving on.
+        let mut cuts = 0u32;
         loop {
             if stop.is_cancelled() {
                 return Ok(());
             }
             let Some(claim) = plan.lock().unwrap().claim(self.options.min_split, max_segments) else { return Ok(()) };
+            let before = plan.lock().unwrap().segments[claim.index].position();
             let result = self.transfer(job, plan, claim.index, part, written, stop).await;
+            let moved = plan.lock().unwrap().segments[claim.index].position() > before;
             plan.lock().unwrap().release(claim.index);
             match result {
-                Ok(()) => {}
+                Ok(()) => cuts = 0,
+                // A dropped connection: this part continues at once on a new connection, from where it
+                // stopped, while the others keep going. Only a connection that keeps failing without
+                // receiving anything fails the attempt (which then waits and retries as a whole).
+                Err(error) if error.kind == ErrorKind::Network && !stop.is_cancelled() && (moved || cuts < 3) => {
+                    cuts = if moved { 1 } else { cuts + 1 };
+                    tokio::select! {
+                        _ = tokio::time::sleep(Duration::from_millis(200 * (cuts as u64 - 1))) => {}
+                        _ = stop.cancelled() => return Ok(()),
+                    }
+                }
                 // A refusal while other connections still work: this one stops, its part stays for them,
                 // and the site is remembered with the number that worked.
                 Err(error) if error.is_refusal() && running.load(Ordering::SeqCst) > 1 && !stop.is_cancelled() => {
