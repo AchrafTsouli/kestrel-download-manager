@@ -1,0 +1,100 @@
+# Signed Kestrel release, built on GitHub's servers and signed for free by SignPath Foundation
+# (code signing for open-source projects: https://signpath.org).
+#
+# Two passes, because the programs inside the installer must be signed before they are packed:
+#   1. build Kestrel.exe, the browser bridge and the command-line tool → SignPath signs them
+#   2. pack the installer with the signed programs → SignPath signs the installer
+# The signed installer is left as this run's artifact; publishing stays a separate, manual step.
+#
+# Needs, once SignPath has accepted the project (see docs/CODE-SIGNING.md):
+#   secret   SIGNPATH_API_TOKEN          the CI user's API token from SignPath
+#   variable SIGNPATH_ORGANIZATION_ID    the organization ID from SignPath
+#   variable SIGNPATH_PROJECT_SLUG       e.g. kestrel
+#   variable SIGNPATH_POLICY_SLUG        e.g. release-signing (test-signing while trying it out)
+
+name: Signed release (SignPath)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-and-sign:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: rust/app/package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Build the programs
+        shell: pwsh
+        run: |
+          Push-Location rust/app; npm ci; npx tauri build --no-bundle; if ($LASTEXITCODE) { exit 1 }; Pop-Location
+          Push-Location rust; cargo build --release -p flux-nmhost -p flux-cli; if ($LASTEXITCODE) { exit 1 }; Pop-Location
+          New-Item -ItemType Directory unsigned-programs | Out-Null
+          Copy-Item rust/target/release/flux.exe, rust/target/release/flux-nmhost.exe, rust/target/release/flux-cli.exe unsigned-programs/
+
+      - name: Keep the unsigned programs for SignPath
+        id: programs
+        uses: actions/upload-artifact@v4
+        with:
+          name: unsigned-programs
+          path: unsigned-programs/
+
+      - name: Sign the programs (SignPath)
+        uses: signpath/github-action-submit-signing-request@v1
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: ${{ vars.SIGNPATH_POLICY_SLUG }}
+          artifact-configuration-slug: programs
+          github-artifact-id: ${{ steps.programs.outputs.artifact-id }}
+          wait-for-completion: true
+          output-artifact-directory: signed-programs
+
+      - name: Pack the installer with the signed programs
+        shell: pwsh
+        run: |
+          Copy-Item signed-programs/* rust/target/release/ -Force
+          ./scripts/Install-InnoCompiler.ps1
+          ./scripts/Build-Flux2Installer.ps1 -SkipBuild
+          New-Item -ItemType Directory unsigned-installer | Out-Null
+          Copy-Item installers/Kestrel-Setup-*-win-x64.exe unsigned-installer/
+
+      - name: Keep the unsigned installer for SignPath
+        id: installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: unsigned-installer
+          path: unsigned-installer/
+
+      - name: Sign the installer (SignPath)
+        uses: signpath/github-action-submit-signing-request@v1
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: ${{ vars.SIGNPATH_POLICY_SLUG }}
+          artifact-configuration-slug: installer
+          github-artifact-id: ${{ steps.installer.outputs.artifact-id }}
+          wait-for-completion: true
+          output-artifact-directory: signed-installer
+
+      - name: Check the signatures
+        shell: pwsh
+        run: |
+          foreach ($file in Get-ChildItem signed-programs/*.exe, signed-installer/*.exe) {
+            $signature = Get-AuthenticodeSignature $file.FullName
+            "$($file.Name): $($signature.Status) ($($signature.SignerCertificate.Subject))"
+            if ($signature.Status -ne 'Valid') { throw "$($file.Name) is not signed." }
+          }
+
+      - name: Keep the signed installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: kestrel-signed-installer
+          path: signed-installer/
