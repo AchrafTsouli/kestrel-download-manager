@@ -9,7 +9,9 @@
 
   let { d, size = 16 }: { d: Download; size?: number } = $props();
   const own = /\.(exe|msi|ico|lnk|scr|cpl)$/i;
-  const key = $derived(d.status === "Completed" && d.exists && own.test(d.name) ? `file:${d.id}` : `type:${(d.name.match(/\.[^.\\/]+$/)?.[0] ?? "").toLowerCase()}`);
+  // A program's logo: from the server before it is downloaded (.exe), from the file once it is.
+  const done = $derived(d.status === "Completed" && d.exists);
+  const key = $derived((done && own.test(d.name)) || /\.exe$/i.test(d.name) ? `file:${d.id}:${done}` :`type:${(d.name.match(/\.[^.\\/]+$/)?.[0] ?? "").toLowerCase()}`);
   let url: string | null = $state(null);
   $effect(() => {
     const k = key;

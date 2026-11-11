@@ -26,6 +26,14 @@
   type ZipEntry = { name: string; size: number; packed: number; modified: string; folder: boolean };
   let preview: ZipEntry[] | null = $state(null);
   let previewing = $state(false);
+  // A program's own logo, read from the server before it is downloaded (like IDM).
+  let logo: string | null = $state(null);
+  let logoFor = "";
+  $effect(() => {
+    if (!pending || !/\.exe$/i.test(fileName) || logoFor === pending.request.url) return;
+    logoFor = pending.request.url;
+    call<string | null>("pending_icon", { id }).then((u) => (logo = u)).catch(() => {});
+  });
   const isZip = $derived(/\.zip$/i.test(fileName));
   async function showPreview() {
     previewing = true; error = "";
@@ -101,7 +109,7 @@
         <button class="btn plus" onclick={() => call("show_window", { name: "options" })} title="Categories and their folders (Options > Save to)" aria-label="Category settings">+</button>
       </div>
       <div class="side">
-        <Icon name={category} size={40} />
+        {#if logo && /\.exe$/i.test(fileName)}<img src={logo} alt="" width="40" height="40" />{:else}<Icon name={category} size={40} />{/if}
         <b title={total != null ? `${total.toLocaleString()} bytes` : ""}>{checking ? "Checking…" : total != null ? size(total) : "Unknown"}</b>
         <button class="btn preview" onclick={showPreview} disabled={!isZip || checking || previewing} title={isZip ? "See the files inside this archive" : "Preview is for .zip archives"}>{previewing ? "Reading…" : "Preview"}</button>
       </div>

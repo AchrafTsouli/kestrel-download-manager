@@ -15,6 +15,7 @@ mod torrents;
 mod updates;
 mod zippreview;
 mod fileicon;
+mod exeicon;
 
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -237,11 +238,37 @@ async fn zip_preview(windows: State<'_, Windows>, id: String) -> Result<Vec<zipp
     let request = windows.pending.lock().unwrap().get(&id).map(|p| p.request.clone()).ok_or("This download was already added or cancelled.")?;
     zippreview::list(&request.url, request.session.as_ref()).await
 }
+/// The start dialog: the logo of a program that is about to be downloaded, read from the server.
+#[tauri::command]
+async fn pending_icon(windows: State<'_, Windows>, id: String) -> Result<Option<String>, String> {
+    let request = windows.pending.lock().unwrap().get(&id).map(|p| p.request.clone()).ok_or("This download was already added or cancelled.")?;
+    use base64::Engine;
+    Ok(exeicon::remote(&request.url, request.session.as_ref()).await.map(|ico| format!("data:image/x-icon;base64,{}", base64::engine::general_purpose::STANDARD.encode(ico))))
+}
 /// The file's own icon for the list (a program's logo once it is downloaded), as a data URL.
 #[tauri::command]
 async fn file_icon(manager: Mgr<'_>, id: String) -> Result<Option<String>, String> {
     let Some(record) = manager.record(&id) else { return Ok(None) };
     let done = record.status == model::Status::Completed && record.destination.exists();
+    let is_exe = record.destination.extension().is_some_and(|e| e.eq_ignore_ascii_case("exe"));
+    // A program not downloaded yet: its logo read from the server (like IDM), kept on disk.
+    if !done && is_exe && matches!(record.kind, model::Kind::Http) {
+        use base64::Engine;
+        let url = |bytes: &[u8]| format!("data:image/x-icon;base64,{}", base64::engine::general_purpose::STANDARD.encode(bytes));
+        let saved = flux_store::default_directory().join("icons").join(format!("{id}.ico"));
+        if let Ok(bytes) = std::fs::read(&saved) {
+            return Ok(Some(url(&bytes)));
+        }
+        static TRIED: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+        if !TRIED.lock().unwrap().contains(&id) {
+            TRIED.lock().unwrap().push(id.clone());
+            if let Some(ico) = exeicon::remote(&record.url, record.session.as_ref()).await {
+                let _ = std::fs::create_dir_all(saved.parent().unwrap());
+                let _ = std::fs::write(&saved, &ico);
+                return Ok(Some(url(&ico)));
+            }
+        }
+    }
     let path = record.destination.clone();
     tauri::async_runtime::spawn_blocking(move || fileicon::data_url(&path, done)).await.map_err(|e| e.to_string())
 }
@@ -1023,7 +1050,7 @@ pub fn run() {
             list_downloads, get_download, get_settings, save_settings, offer_url, get_pending, confirm_pending, cancel_pending,
             probe_video, video_exact_cut, confirm_video, video_as_file, load_torrent, confirm_torrent, open_torrent_file, check_updates, install_update, drag_item, grab_site, run_waiting, register_browsers, test_browsers, set_after_complete, get_after_complete, open_with, to_background, crash_reports, dismiss_crash, report_crash,
             add_downloads, pause_downloads, resume_downloads, pause_all, resume_all, remove_downloads, remove_completed,
-            rename_download, redownload, zip_preview, file_icon, move_in_queue, write_link_list, read_link_list, set_speed_limit, set_queue, enqueue, start_queue, stop_queue, running_queues,
+            rename_download, redownload, zip_preview, file_icon, pending_icon, move_in_queue, write_link_list, read_link_list, set_speed_limit, set_queue, enqueue, start_queue, stop_queue, running_queues,
             open_file, show_in_folder, open_folder, show_progress, show_window, power_action, exit_app, app_version
         ])
         .run(tauri::generate_context!())
