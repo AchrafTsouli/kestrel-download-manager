@@ -34,7 +34,7 @@
   let typeFor = "";
   const extension = $derived((fileName.match(/\.[^.\\/]+$/)?.[0] ?? "").toLowerCase());
   $effect(() => {
-    if (pending && extension === ".exe" && logoFor !== pending.request.url) {
+    if (pending && !checking && extension === ".exe" && logoFor !== pending.request.url) {
       logoFor = pending.request.url;
       call<string | null>("pending_icon", { id }).then((u) => (logo = u)).catch(() => {});
     }
@@ -56,8 +56,10 @@
   let folderEdited = false;
   const win = getCurrentWindow();
 
+  let finalUrl: string | null = $state(null);
   function useProbe(p: Probe) {
     checking = false;
+    finalUrl = p.finalUrl ?? null;
     total = p.total;
     note = p.error ?? (p.resumable ? "" : "This server does not allow resuming; a paused download restarts from the beginning.");
     if (!nameEdited) fileName = p.fileName;
@@ -111,7 +113,7 @@
   <div class="win-body">
     <div class="grid">
       <label for="url">URL</label>
-      <input id="url" class="input wide" readonly value={pending?.request.url ?? ""} />
+      <input id="url" class="input wide" readonly value={finalUrl ?? pending?.request.url ?? ""} title={finalUrl ? `Asked for: ${pending?.request.url}` : ""} />
 
       <label for="cat">Category</label>
       <div class="row cat">

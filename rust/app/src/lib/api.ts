@@ -42,7 +42,7 @@ export type Rule = {
   name: string; enabled: boolean; domain: string; extensions: string; urlPattern: string;
   folder: string; category: string; queue: string; connections: number | null; speedLimit: number | null;
 };
-export type Probe = { url: string; fileName: string; total: number | null; resumable: boolean; contentType: string | null; category: string; folder: string; error: string | null };
+export type Probe = { finalUrl?: string | null; url: string; fileName: string; total: number | null; resumable: boolean; contentType: string | null; category: string; folder: string; error: string | null };
 
 export const call = invoke;
 export const categories = ["Compressed", "Documents", "Music", "Programs", "Video", "Images", "Other"];

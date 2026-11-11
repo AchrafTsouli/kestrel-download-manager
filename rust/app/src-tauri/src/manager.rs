@@ -59,6 +59,9 @@ pub struct Probe {
     pub category: String,
     pub folder: String,
     pub error: Option<String>,
+    /// Where the file really is, when the address led there (a redirect or a download page).
+    #[serde(default)]
+    pub final_url: Option<String>,
 }
 
 pub struct Manager {
@@ -239,7 +242,7 @@ impl Manager {
         let parsed = Url::parse(url.trim());
         let fallback = parsed.as_ref().map(Manager::name_from_url).unwrap_or_else(|_| "download.bin".into());
         let mut name = suggested.filter(|s| !s.trim().is_empty()).map(|s| flux_engine::sanitize_file_name(&s)).unwrap_or(fallback);
-        let mut probe = Probe { url: url.trim().to_string(), file_name: name.clone(), total: None, resumable: false, content_type: None, category: category_for(&name).into(), folder: String::new(), error: None };
+        let mut probe = Probe { url: url.trim().to_string(), file_name: name.clone(), total: None, resumable: false, content_type: None, category: category_for(&name).into(), folder: String::new(), error: None, final_url: None };
         match parsed {
             Ok(parsed) if matches!(parsed.scheme(), "http" | "https") => {
                 let mut job = Job::new(parsed, std::env::temp_dir().join("flux-probe"));
@@ -253,6 +256,7 @@ impl Manager {
                         probe.total = info.total;
                         probe.resumable = info.ranged;
                         probe.content_type = info.content_type;
+                        probe.final_url = Some(info.final_url).filter(|f| f != url.trim());
                     }
                     Ok(Err(error)) => probe.error = Some(error.message),
                     Err(_) => probe.error = Some("The server did not answer in time; the size will be known when the download starts.".into()),

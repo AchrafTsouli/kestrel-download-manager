@@ -30,6 +30,7 @@ use sha2::{Digest, Sha256};
 use tokio_util::sync::CancellationToken;
 use url::Url;
 
+mod page;
 pub use error::{Error, ErrorKind, Result};
 pub use limits::{HostLimits, Limiter};
 pub use plan::{Plan, Segment};
@@ -280,6 +281,9 @@ impl Engine {
             session.validate(&job.url)?;
         }
         job.resume.final_url = None;
+        // A download page ("your download will start…") is followed to the file, at most 3 pages deep.
+        let mut pages = 0;
+        let response = loop {
         let mut response = self.send(job, None, Some((0, Some(0))), None).await?;
         let refused = |r: &reqwest::Response| matches!(r.status().as_u16(), 400 | 403 | 405 | 406 | 416) && !r.headers().contains_key(header::WWW_AUTHENTICATE);
         if refused(&response) {
@@ -314,8 +318,30 @@ impl Engine {
         let file_name = headers.get(header::CONTENT_DISPOSITION).and_then(|v| v.to_str().ok()).and_then(disposition_name);
         let destination_is_page = job.destination.extension().is_some_and(|e| e.eq_ignore_ascii_case("html") || e.eq_ignore_ascii_case("htm"));
         if matches!(content_type.as_deref(), Some("text/html" | "application/xhtml+xml")) && file_name.is_none() && !destination_is_page {
+            if pages < 3 {
+                let here = response.url().clone();
+                let header_refresh = headers.get(header::REFRESH).and_then(|v| v.to_str().ok()).and_then(|v| page::refresh(v, &here));
+                let next = match header_refresh {
+                    Some(next) => Some(next),
+                    None => {
+                        let body = read_some(response, 512 * 1024).await;
+                        let text = String::from_utf8_lossy(&body);
+                        page::meta_refresh(&text, &here).or_else(|| page::same_name_link(&text, &here, &job.url))
+                    }
+                };
+                if let Some(next) = next {
+                    pages += 1;
+                    job.resume.final_url = Some(next.to_string());
+                    continue;
+                }
+            }
             return Err(Error::protocol("The link returned a web page instead of a file. Capture the download again from the browser; it may be a page link or an expired link."));
         }
+        break response;
+        };
+        let headers = response.headers();
+        let content_type = headers.get(header::CONTENT_TYPE).and_then(|v| v.to_str().ok()).map(|v| v.split(';').next().unwrap_or("").trim().to_ascii_lowercase());
+        let file_name = headers.get(header::CONTENT_DISPOSITION).and_then(|v| v.to_str().ok()).and_then(disposition_name);
         let partial = response.status() == StatusCode::PARTIAL_CONTENT;
         let total = if partial {
             let range = headers.get(header::CONTENT_RANGE).and_then(|v| v.to_str().ok()).and_then(content_range).ok_or_else(|| Error::protocol("The server returned invalid file-size information."))?;
@@ -712,4 +738,17 @@ mod tests {
         assert_eq!(disposition_name("attachment; filename=\"x.bin\"; filename*=UTF-8''r%C3%A9sum%C3%A9.pdf"), Some("résumé.pdf".into()));
         assert_eq!(content_range("bytes 0-0/12345"), Some((0, 0, Some(12345))));
     }
+}
+
+/// The start of a response body, at most `max` bytes (for reading a download page).
+async fn read_some(mut response: reqwest::Response, max: usize) -> Vec<u8> {
+    let mut body = Vec::new();
+    while body.len() < max {
+        match tokio::time::timeout(Duration::from_secs(10), response.chunk()).await {
+            Ok(Ok(Some(chunk))) => body.extend_from_slice(&chunk),
+            _ => break,
+        }
+    }
+    body.truncate(max);
+    body
 }

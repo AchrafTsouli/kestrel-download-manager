@@ -188,6 +188,7 @@ fn video_probe(manager: &Manager, request: &PendingRequest, selection: &flux_med
         category: category.into(),
         folder: manager.folder_for(category).to_string_lossy().into_owned(),
         error: None,
+        final_url: None,
     }
 }
 
@@ -241,9 +242,11 @@ async fn zip_preview(windows: State<'_, Windows>, id: String) -> Result<Vec<zipp
 /// The start dialog: the logo of a program that is about to be downloaded, read from the server.
 #[tauri::command]
 async fn pending_icon(windows: State<'_, Windows>, id: String) -> Result<Option<String>, String> {
-    let request = windows.pending.lock().unwrap().get(&id).map(|p| p.request.clone()).ok_or("This download was already added or cancelled.")?;
+    let (request, probe) = windows.pending.lock().unwrap().get(&id).map(|p| (p.request.clone(), p.probe.clone())).ok_or("This download was already added or cancelled.")?;
+    // The address the file is really at (after a redirect or a download page).
+    let address = probe.and_then(|p| p.final_url).unwrap_or(request.url);
     use base64::Engine;
-    Ok(exeicon::remote(&request.url, request.session.as_ref()).await.map(|ico| format!("data:image/x-icon;base64,{}", base64::engine::general_purpose::STANDARD.encode(ico))))
+    Ok(exeicon::remote(&address, request.session.as_ref()).await.map(|ico| format!("data:image/x-icon;base64,{}", base64::engine::general_purpose::STANDARD.encode(ico))))
 }
 /// The icon Windows shows for a type of file (WinRAR's for .rar…), by its name: like Explorer and MDM.
 #[tauri::command]
@@ -267,7 +270,8 @@ async fn file_icon(manager: Mgr<'_>, id: String) -> Result<Option<String>, Strin
         static TRIED: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
         if !TRIED.lock().unwrap().contains(&id) {
             TRIED.lock().unwrap().push(id.clone());
-            if let Some(ico) = exeicon::remote(&record.url, record.session.as_ref()).await {
+            let address = record.resume.final_url.clone().unwrap_or_else(|| record.url.clone());
+            if let Some(ico) = exeicon::remote(&address, record.session.as_ref()).await {
                 let _ = std::fs::create_dir_all(saved.parent().unwrap());
                 let _ = std::fs::write(&saved, &ico);
                 return Ok(Some(url(&ico)));
