@@ -103,7 +103,7 @@ pub fn ico_from_resources(res: &[u8], base_rva: u32) -> Option<Vec<u8>> {
 
 /// Reads the logo of the .exe at `url` from the server. None when the server does not send byte
 /// ranges, or the file is not a Windows program, or it has no icon.
-pub async fn remote(url: &str, session: Option<&flux_engine::Session>) -> Option<Vec<u8>> {
+pub async fn remote(url: &str, session: Option<&kestrel_engine::Session>) -> Option<Vec<u8>> {
     let url = Url::parse(url).ok()?;
     let mut headers = HeaderMap::new();
     if let Some(session) = session {
@@ -142,7 +142,7 @@ mod tests {
 
 #[cfg(test)]
 mod online {
-    /// Reads 7-Zip's logo from its download server. Run with: cargo test -p flux-app exeicon_online -- --ignored
+    /// Reads 7-Zip's logo from its download server. Run with: cargo test -p kestrel-app exeicon_online -- --ignored
     #[test]
     #[ignore]
     fn exeicon_online() {

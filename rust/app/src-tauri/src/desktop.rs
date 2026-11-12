@@ -1,5 +1,5 @@
 //! Windows niceties: overall progress on the taskbar button, notifications when a download ends
-//! while Flux is out of sight, and the picture shown while dragging a finished file out.
+//! while Kestrel is out of sight, and the picture shown while dragging a finished file out.
 
 use std::path::PathBuf;
 use std::time::Duration;
@@ -44,7 +44,7 @@ pub fn taskbar_progress(app: AppHandle) {
     });
 }
 
-/// True when the user is looking at Flux's main window.
+/// True when the user is looking at Kestrel's main window.
 fn in_view(app: &AppHandle) -> bool {
     app.get_webview_window("main").is_some_and(|w| w.is_visible().unwrap_or(false) && w.is_focused().unwrap_or(false))
 }
@@ -73,9 +73,9 @@ pub fn failed(app: &AppHandle, id: &str, error: &str) {
     }
 }
 
-/// The picture under the pointer while a file is dragged out of Flux.
+/// The picture under the pointer while a file is dragged out of Kestrel.
 pub fn drag_icon() -> Result<PathBuf, String> {
-    let path = std::env::temp_dir().join("flux-drag-icon.png");
+    let path = std::env::temp_dir().join("kestrel-drag-icon.png");
     if !path.exists() {
         std::fs::write(&path, include_bytes!("../icons/32x32.png")).map_err(|e| e.to_string())?;
     }

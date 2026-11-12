@@ -10,7 +10,7 @@ const http=require('http'),path=require('path'),assert=require('node:assert/stri
   else if(req.url==='/blob')content=`<video controls style="width:800px;height:450px"></video><script>document.querySelector('video').src=URL.createObjectURL(new Blob(['fixture'],{type:'video/mp4'}))</script>`;
   else if(req.url==='/frame')content=`<iframe style="width:850px;height:520px" srcdoc='${video}'></iframe>`;
   else content=video;
-  res.writeHead(200,{'Content-Type':'text/html'});res.end(`<title>Actual Flux extension test</title><body style="background:#222;color:white"><h1>${req.url}</h1>${content}`);
+  res.writeHead(200,{'Content-Type':'text/html'});res.end(`<title>Actual Kestrel extension test</title><body style="background:#222;color:white"><h1>${req.url}</h1>${content}`);
  });
  await new Promise(r=>server.listen(0,'127.0.0.1',r));base='http://127.0.0.1:'+server.address().port;
  let context;

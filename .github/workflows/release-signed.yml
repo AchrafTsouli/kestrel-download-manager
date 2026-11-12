@@ -33,9 +33,9 @@ jobs:
         shell: pwsh
         run: |
           Push-Location rust/app; npm ci; npx tauri build --no-bundle; if ($LASTEXITCODE) { exit 1 }; Pop-Location
-          Push-Location rust; cargo build --release -p flux-nmhost -p flux-cli; if ($LASTEXITCODE) { exit 1 }; Pop-Location
+          Push-Location rust; cargo build --release -p kestrel-nmhost -p kestrel-cli; if ($LASTEXITCODE) { exit 1 }; Pop-Location
           New-Item -ItemType Directory unsigned-programs | Out-Null
-          Copy-Item rust/target/release/flux.exe, rust/target/release/flux-nmhost.exe, rust/target/release/flux-cli.exe unsigned-programs/
+          Copy-Item rust/target/release/kestrel.exe, rust/target/release/kestrel-nmhost.exe, rust/target/release/kestrel-cli.exe unsigned-programs/
 
       - name: Keep the unsigned programs for SignPath
         id: programs
@@ -61,7 +61,7 @@ jobs:
         run: |
           Copy-Item signed-programs/* rust/target/release/ -Force
           ./scripts/Install-InnoCompiler.ps1
-          ./scripts/Build-Flux2Installer.ps1 -SkipBuild
+          ./scripts/Build-Installer.ps1 -SkipBuild
           New-Item -ItemType Directory unsigned-installer | Out-Null
           Copy-Item installers/Kestrel-Setup-*-win-x64.exe unsigned-installer/
 

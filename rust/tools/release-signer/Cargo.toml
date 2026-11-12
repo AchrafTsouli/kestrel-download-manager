@@ -7,8 +7,8 @@ license.workspace = true
 publish = false
 
 [dependencies]
-flux-update.workspace = true
-flux-store.workspace = true
+kestrel-update.workspace = true
+kestrel-store.workspace = true
 p256 = { version = "0.13", default-features = false, features = ["ecdsa", "pkcs8", "std"] }
 base64 = "0.22"
 sha2.workspace = true

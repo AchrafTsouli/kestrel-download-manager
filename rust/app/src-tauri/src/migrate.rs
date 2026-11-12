@@ -2,13 +2,13 @@
 //! never changed (1.x may still be installed beside 2.0 during the beta).
 //!
 //! Unfinished 1.x downloads kept one part file per connection; they are joined once into 2.0's
-//! single `.flux.part` so the download continues where it stopped. Videos keep their parts folder
+//! single `.kestrel.part` so the download continues where it stopped. Videos keep their parts folder
 //! and torrents their saved file list.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use flux_engine::{Resume, Session, file::{PartFile, part_path}};
+use kestrel_engine::{Resume, Session, file::{PartFile, part_path}};
 use serde_json::{Map, Value};
 
 use crate::model::{AfterQueue, Kind, MAIN_QUEUE, Queue, Record, Settings, Status};
@@ -137,8 +137,8 @@ pub fn record(job: &Value, torrent_cache: &Path) -> Option<Record> {
     let kind = if let Some(video) = job.get("Video").filter(|v| v.is_object()) {
         Kind::Video { selection: serde_json::from_value(camel(video)).ok()? }
     } else if let Some(torrent) = job.get("Torrent").filter(|v| v.is_object()) {
-        let mut selection: flux_torrent::Selection = serde_json::from_value(camel(torrent)).ok()?;
-        selection.metadata_file = flux_torrent::metadata_path(torrent_cache, &selection.info_hash);
+        let mut selection: kestrel_torrent::Selection = serde_json::from_value(camel(torrent)).ok()?;
+        selection.metadata_file = kestrel_torrent::metadata_path(torrent_cache, &selection.info_hash);
         Kind::Torrent { selection }
     } else {
         Kind::Http
@@ -188,7 +188,7 @@ pub fn join_parts(job: &Value, record: &Record) -> std::io::Result<Option<Resume
     if target.exists() {
         return Ok(None);
     }
-    let mut plan = flux_engine::plan::Plan::default();
+    let mut plan = kestrel_engine::plan::Plan::default();
     let mut parts = Vec::new();
     for (index, segment) in segments.iter().enumerate() {
         let start = number(segment, "Start").unwrap_or(0);
@@ -196,7 +196,7 @@ pub fn join_parts(job: &Value, record: &Record) -> std::io::Result<Option<Resume
         let file = v1_part(job, &record.destination, &record.id, index);
         let on_disk = std::fs::metadata(&file).map(|m| m.len()).unwrap_or(0);
         let done = number(segment, "CommittedBytes").unwrap_or(on_disk).min(on_disk);
-        plan.segments.push(flux_engine::plan::Segment { start, end, done, active: false, speed: 0 });
+        plan.segments.push(kestrel_engine::plan::Segment { start, end, done, active: false, speed: 0 });
         parts.push((file, start, done));
     }
     if parts.iter().all(|(_, _, done)| *done == 0) {
@@ -243,7 +243,7 @@ pub fn carry_files(job: &Value, record: &mut Record, v1_torrents: &Path) {
         },
         Kind::Video { .. } => {
             if let Some(work) = text(job, "MediaWorkDirectory").map(PathBuf::from).filter(|w| w.is_dir()) {
-                let new = record.destination.parent().unwrap_or(Path::new("")).join(format!(".flux-video-{}", record.id));
+                let new = record.destination.parent().unwrap_or(Path::new("")).join(format!(".kestrel-video-{}", record.id));
                 let _ = std::fs::rename(work, new);
             }
         }
@@ -251,7 +251,7 @@ pub fn carry_files(job: &Value, record: &mut Record, v1_torrents: &Path) {
             if let Some(parent) = selection.metadata_file.parent() {
                 let _ = std::fs::create_dir_all(parent);
             }
-            let old = flux_torrent::metadata_path(v1_torrents, &selection.info_hash);
+            let old = kestrel_torrent::metadata_path(v1_torrents, &selection.info_hash);
             if !selection.metadata_file.exists() {
                 let _ = std::fs::copy(old, &selection.metadata_file);
             }
@@ -264,7 +264,7 @@ pub fn import(v1_history: &Path, torrent_cache: &Path) -> Option<(Settings, Vec<
     if !v1_history.exists() {
         return None;
     }
-    let history = flux_store::import_v1(v1_history).ok()?;
+    let history = kestrel_store::import_v1(v1_history).ok()?;
     let settings = history.settings.as_ref().map(settings).unwrap_or_default();
     let v1_torrents = v1_history.parent().unwrap_or(Path::new("")).join("torrents");
     let mut records = Vec::new();
@@ -334,7 +334,7 @@ mod tests {
 
     #[test]
     fn unfinished_parts_are_joined_where_they_belong() {
-        let dir = std::env::temp_dir().join(format!("flux-migrate-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("kestrel-migrate-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let destination = dir.join("big.bin");
         let id = "ffffffffffffffffffffffffffffffff";
@@ -365,8 +365,8 @@ mod real {
     #[test]
     #[ignore]
     fn the_installed_1x_history_imports() {
-        let path = flux_store::v1_history_path();
-        let history = flux_store::import_v1(&path).expect("1.x history readable");
+        let path = kestrel_store::v1_history_path();
+        let history = kestrel_store::import_v1(&path).expect("1.x history readable");
         let records: Vec<_> = history.downloads.iter().filter_map(|j| super::record(j, &std::env::temp_dir())).collect();
         let settings = history.settings.as_ref().map(super::settings).unwrap_or_default();
         println!("1.x downloads: {}, mapped: {}, queues: {}, settings read: {}", history.downloads.len(), records.len(), settings.queues.len(), history.settings.is_some());
@@ -380,16 +380,16 @@ mod real {
 
 #[cfg(test)]
 mod seed {
-    /// Prepares a separate Flux (FLUX_DATA_DIR) for end-to-end runs: no dialogs, downloads into
-    /// FLUX_TEST_DOWNLOADS, and no 1.x import.
+    /// Prepares a separate Kestrel (KESTREL_DATA_DIR) for end-to-end runs: no dialogs, downloads into
+    /// KESTREL_TEST_DOWNLOADS, and no 1.x import.
     #[test]
     #[ignore]
     fn seed_test_profile() {
-        let dir = flux_store::default_directory();
-        assert!(std::env::var_os("FLUX_DATA_DIR").is_some(), "set FLUX_DATA_DIR");
-        let store = flux_store::Store::open(&dir.join("history.db")).unwrap();
+        let dir = kestrel_store::default_directory();
+        assert!(std::env::var_os("KESTREL_DATA_DIR").is_some(), "set KESTREL_DATA_DIR");
+        let store = kestrel_store::Store::open(&dir.join("history.db")).unwrap();
         let mut settings = crate::model::Settings::default();
-        settings.download_dir = std::env::var_os("FLUX_TEST_DOWNLOADS").map(std::path::PathBuf::from).expect("set FLUX_TEST_DOWNLOADS");
+        settings.download_dir = std::env::var_os("KESTREL_TEST_DOWNLOADS").map(std::path::PathBuf::from).expect("set KESTREL_TEST_DOWNLOADS");
         settings.show_start_dialog = false;
         settings.show_progress_window = false;
         settings.show_complete_dialog = false;
@@ -397,18 +397,18 @@ mod seed {
         settings.extension_guide_shown = true;
         settings.auto_update_tools = false;
         settings.monitor_clipboard = false;
-        if std::env::var_os("FLUX_TEST_DIALOGS").is_some() {
+        if std::env::var_os("KESTREL_TEST_DIALOGS").is_some() {
             settings.show_start_dialog = true;
         }
-        if std::env::var_os("FLUX_TEST_WINDOWS").is_some() {
+        if std::env::var_os("KESTREL_TEST_WINDOWS").is_some() {
             settings.show_progress_window = true;
             settings.show_complete_dialog = true;
         }
-        if let Ok(language) = std::env::var("FLUX_TEST_LANGUAGE") {
+        if let Ok(language) = std::env::var("KESTREL_TEST_LANGUAGE") {
             settings.language = language;
         }
-        // FLUX_TEST_HISTORY=N: a long history of finished downloads (list and CPU checks).
-        if let Some(count) = std::env::var("FLUX_TEST_HISTORY").ok().and_then(|n| n.parse::<usize>().ok()) {
+        // KESTREL_TEST_HISTORY=N: a long history of finished downloads (list and CPU checks).
+        if let Some(count) = std::env::var("KESTREL_TEST_HISTORY").ok().and_then(|n| n.parse::<usize>().ok()) {
             let folder = settings.download_dir.clone();
             let list: Vec<(String, crate::model::Record)> = (0..count)
                 .map(|i| {

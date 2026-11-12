@@ -1,4 +1,4 @@
-//! The few texts Flux shows from outside its windows (tray menu, notifications), in the
+//! The few texts Kestrel shows from outside its windows (tray menu, notifications), in the
 //! interface language. The windows translate themselves (src/lib/i18n.ts).
 
 /// The language to use for `setting` ("auto" follows Windows' display language).

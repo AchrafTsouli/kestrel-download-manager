@@ -25,16 +25,16 @@ fn main() {
     if command != "sign" {
         fail("The only command is: sign", 1);
     }
-    if flux_update::parse_version(version).is_none() || !url.starts_with("https://") {
+    if kestrel_update::parse_version(version).is_none() || !url.starts_with("https://") {
         fail("Use a numeric version (2.0.0) and an HTTPS download URL.", 4);
     }
     let sealed = std::fs::read(key_file).unwrap_or_else(|e| fail(&format!("Cannot read the key file: {e}"), 2));
     // Flux 1.x protected it without extra entropy.
-    let pkcs8 = flux_store::secret::unprotect(&sealed, &[]).unwrap_or_else(|_| fail("The key file cannot be opened with this Windows account.", 2));
+    let pkcs8 = kestrel_store::secret::unprotect(&sealed, &[]).unwrap_or_else(|_| fail("The key file cannot be opened with this Windows account.", 2));
     let key = SigningKey::from_pkcs8_der(&pkcs8).unwrap_or_else(|_| fail("The key file does not hold a P-256 private key.", 2));
     let bytes = std::fs::read(installer).unwrap_or_else(|e| fail(&format!("Cannot read the installer: {e}"), 3));
     let sha: String = Sha256::digest(&bytes).iter().map(|b| format!("{b:02x}")).collect();
-    let signature: Signature = key.sign(&flux_update::payload(version, url, &sha));
+    let signature: Signature = key.sign(&kestrel_update::payload(version, url, &sha));
     let feed = serde_json::json!({
         "version": version,
         "url": url,
@@ -43,7 +43,7 @@ fn main() {
     });
     let text = serde_json::to_string_pretty(&feed).expect("json");
     // The same check the app makes, with the public key it has built in.
-    match flux_update::parse(text.as_bytes(), flux_update::PUBLIC_KEY) {
+    match kestrel_update::parse(text.as_bytes(), kestrel_update::PUBLIC_KEY) {
         Ok(release) if release.signed => {}
         _ => fail("Signature self-check failed: this key is not the release key built into Kestrel.", 5),
     }

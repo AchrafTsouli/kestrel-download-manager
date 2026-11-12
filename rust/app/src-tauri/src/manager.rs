@@ -5,8 +5,8 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use flux_engine::{Engine, Event, HostLimits, Job, Limiter, Options, Outcome, Session};
-use flux_store::Store;
+use kestrel_engine::{Engine, Event, HostLimits, Job, Limiter, Options, Outcome, Session};
+use kestrel_store::Store;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
 use tokio_util::sync::CancellationToken;
@@ -42,9 +42,9 @@ pub struct AddRequest {
     pub expected_sha256: Option<String>,
     pub total: Option<u64>,
     /// A video quality (and clip) chosen in the picker or the browser.
-    pub video: Option<flux_media::Selection>,
+    pub video: Option<kestrel_media::Selection>,
     /// A torrent's chosen files (the address is then its magnet link).
-    pub torrent: Option<flux_torrent::Selection>,
+    pub torrent: Option<kestrel_torrent::Selection>,
 }
 
 /// File information for the start dialog, from a quick request to the server.
@@ -67,15 +67,15 @@ pub struct Probe {
 pub struct Manager {
     pub app: AppHandle,
     pub engine: Engine,
-    pub media: flux_media::Tools,
-    pub torrents: flux_torrent::Tools,
+    pub media: kestrel_media::Tools,
+    pub torrents: kestrel_torrent::Tools,
     store: Mutex<Store>,
     pub settings: RwLock<Settings>,
     records: Mutex<Vec<Record>>,
     live: Mutex<HashMap<String, Live>>,
     /// Queues whose schedule started them (a stopped queue keeps its downloads waiting).
     pub running_queues: Mutex<std::collections::HashSet<String>>,
-    /// Flux dialled the VPN and it is still up.
+    /// Kestrel dialled the VPN and it is still up.
     vpn_up: tokio::sync::Mutex<bool>,
     /// Downloads whose progress changed since the windows were last told (sent together, 4 times a second).
     changed: Mutex<std::collections::HashSet<String>>,
@@ -89,10 +89,10 @@ impl Manager {
     pub fn open(app: AppHandle, data_dir: &Path) -> Result<Shared, String> {
         let mut store = Store::open(&data_dir.join("history.db")).map_err(|e| e.to_string())?;
         // The first start after Flux 1.x brings its settings and downloads along (once).
-        // (A portable copy starts empty: the installed 1.x's history belongs to the installed Flux.)
-        let fresh = !flux_store::is_portable() && store.get::<Settings>("settings").map_err(|e| e.to_string())?.is_none() && store.get::<bool>("imported-v1").ok().flatten().is_none();
+        // (A portable copy starts empty: the installed 1.x's history belongs to the installed Kestrel.)
+        let fresh = !kestrel_store::is_portable() && store.get::<Settings>("settings").map_err(|e| e.to_string())?.is_none() && store.get::<bool>("imported-v1").ok().flatten().is_none();
         if fresh {
-            if let Some((settings, records)) = crate::migrate::import(&flux_store::v1_history_path(), &data_dir.join("torrents")) {
+            if let Some((settings, records)) = crate::migrate::import(&kestrel_store::v1_history_path(), &data_dir.join("torrents")) {
                 let list: Vec<(String, Record)> = records.into_iter().map(|r| (r.id.clone(), r)).collect();
                 store.save_downloads(&list).map_err(|e| e.to_string())?;
                 store.set("settings", &settings).map_err(|e| e.to_string())?;
@@ -101,7 +101,7 @@ impl Manager {
         }
         let settings: Settings = store.get("settings").map_err(|e| e.to_string())?.unwrap_or_default();
         let mut records: Vec<Record> = store.load_downloads::<Record>().map_err(|e| e.to_string())?.into_iter().map(|(_, r)| r).collect();
-        // Nothing runs before Flux starts it again; unfinished downloads wait as paused.
+        // Nothing runs before Kestrel starts it again; unfinished downloads wait as paused.
         for record in &mut records {
             if record.status.running() || record.status == Status::Queued {
                 record.status = Status::Paused;
@@ -116,8 +116,8 @@ impl Manager {
         let manager = Arc::new(Manager {
             app,
             engine,
-            media: flux_media::Tools::new(video_tools_directory(), flux_store::default_directory().join("tools")),
-            torrents: flux_torrent::Tools::new(aria2_path(), flux_store::default_directory().join("torrents")),
+            media: kestrel_media::Tools::new(video_tools_directory(), kestrel_store::default_directory().join("tools")),
+            torrents: kestrel_torrent::Tools::new(aria2_path(), kestrel_store::default_directory().join("torrents")),
             store: Mutex::new(store),
             settings: RwLock::new(settings),
             records: Mutex::new(records),
@@ -225,7 +225,7 @@ impl Manager {
     }
     /// Proxy and browser identity for the engine, yt-dlp and aria2.
     fn apply_network(&self, settings: &Settings) -> Result<(), String> {
-        let proxy = (settings.proxy_mode == 2 && !settings.proxy.trim().is_empty()).then(|| flux_engine::Proxy {
+        let proxy = (settings.proxy_mode == 2 && !settings.proxy.trim().is_empty()).then(|| kestrel_engine::Proxy {
             url: settings.proxy.trim().to_string(),
             username: settings.proxy_username.clone(),
             password: settings.proxy_password.clone(),
@@ -277,7 +277,7 @@ impl Manager {
     /// A free name in `folder`: neither on disk nor used by another download.
     fn unique(&self, folder: &Path, name: &str) -> PathBuf {
         let records = self.records.lock().unwrap();
-        let taken = |path: &Path| path.exists() || flux_engine::file::part_path(path).exists() || records.iter().any(|r| r.destination == path);
+        let taken = |path: &Path| path.exists() || kestrel_engine::file::part_path(path).exists() || records.iter().any(|r| r.destination == path);
         let first = folder.join(name);
         if !taken(&first) {
             return first;
@@ -289,7 +289,7 @@ impl Manager {
 
     fn name_from_url(url: &Url) -> String {
         let raw = url.path_segments().and_then(|mut s| s.next_back()).unwrap_or("");
-        let name = flux_engine::sanitize_file_name(&percent_decode(raw));
+        let name = kestrel_engine::sanitize_file_name(&percent_decode(raw));
         if name.contains('.') { name } else { "download.bin".into() }
     }
 
@@ -297,11 +297,11 @@ impl Manager {
     pub async fn probe(&self, url: &str, session: Option<Session>, suggested: Option<String>) -> Probe {
         let parsed = Url::parse(url.trim());
         let fallback = parsed.as_ref().map(Manager::name_from_url).unwrap_or_else(|_| "download.bin".into());
-        let mut name = suggested.filter(|s| !s.trim().is_empty()).map(|s| flux_engine::sanitize_file_name(&s)).unwrap_or(fallback);
+        let mut name = suggested.filter(|s| !s.trim().is_empty()).map(|s| kestrel_engine::sanitize_file_name(&s)).unwrap_or(fallback);
         let mut probe = Probe { url: url.trim().to_string(), file_name: name.clone(), total: None, resumable: false, content_type: None, category: category_for(&name).into(), folder: String::new(), error: None, final_url: None };
         match parsed {
             Ok(parsed) if matches!(parsed.scheme(), "http" | "https") => {
-                let mut job = Job::new(parsed, std::env::temp_dir().join("flux-probe"));
+                let mut job = Job::new(parsed, std::env::temp_dir().join("kestrel-probe"));
                 job.session = session;
                 match tokio::time::timeout(Duration::from_secs(20), self.engine.probe(&mut job)).await {
                     Ok(Ok(info)) => {
@@ -344,7 +344,7 @@ impl Manager {
         if let Some(selection) = &request.video {
             selection.validate(url.as_str())?;
             // Video jobs keep the page's normal form (one address per YouTube video).
-            url = Url::parse(&flux_media::pages::canonicalize(url.as_str()).ok_or("Use a video page or an HLS/DASH stream address.")?).map_err(|e| e.to_string())?;
+            url = Url::parse(&kestrel_media::pages::canonicalize(url.as_str()).ok_or("Use a video page or an HLS/DASH stream address.")?).map_err(|e| e.to_string())?;
         }
         if !matches!(url.scheme(), "http" | "https") || !url.username().is_empty() {
             return Err("Only HTTP and HTTPS links without a user name in them are supported.".into());
@@ -357,7 +357,7 @@ impl Manager {
             session.validate(&url).map_err(|e| e.message)?;
         }
         let session = self.with_login(&url, request.session.clone());
-        let mut name = request.file_name.as_deref().filter(|n| !n.trim().is_empty()).map(flux_engine::sanitize_file_name).unwrap_or_else(|| Manager::name_from_url(&url));
+        let mut name = request.file_name.as_deref().filter(|n| !n.trim().is_empty()).map(kestrel_engine::sanitize_file_name).unwrap_or_else(|| Manager::name_from_url(&url));
         if let Some(selection) = &request.video {
             // The file is named after the format that will be written.
             let stem = Path::new(&name).file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "Video".into());
@@ -424,8 +424,8 @@ impl Manager {
     }
 
     /// A torrent is saved under its own name in the chosen folder (aria2 continues there after a pause).
-    fn add_torrent(self: &Arc<Self>, request: AddRequest, selection: flux_torrent::Selection) -> Result<String, String> {
-        let url = flux_torrent::magnet(&selection.info_hash, &selection.name);
+    fn add_torrent(self: &Arc<Self>, request: AddRequest, selection: kestrel_torrent::Selection) -> Result<String, String> {
+        let url = kestrel_torrent::magnet(&selection.info_hash, &selection.name);
         selection.validate(&url)?;
         if let Some(existing) = self.records.lock().unwrap().iter().find(|r| matches!(&r.kind, Kind::Torrent { selection: s } if s.info_hash == selection.info_hash) && r.status != Status::Completed) {
             return Err(format!("This torrent is already in the list as {}.", existing.name()));
@@ -528,7 +528,7 @@ impl Manager {
                 move |event: Event| manager.on_event(&id, event)
             };
             let result = match manager.ensure_vpn().await {
-                Err(error) => Err(flux_engine::Error::protocol(error)),
+                Err(error) => Err(kestrel_engine::Error::protocol(error)),
                 Ok(()) => manager.engine.download(&mut job, events, cancel).await,
             };
             let result = match result {
@@ -538,7 +538,7 @@ impl Manager {
                         manager.unpack(&id, &path).await;
                         Ok(Outcome::Completed { path, bytes, sha256 })
                     }
-                    Err(error) => Err(flux_engine::Error::protocol(error)),
+                    Err(error) => Err(kestrel_engine::Error::protocol(error)),
                 },
                 other => other,
             };
@@ -584,7 +584,7 @@ impl Manager {
         self.changed(id);
     }
 
-    fn finish(self: &Arc<Self>, id: &str, job: Job, result: flux_engine::Result<Outcome>) {
+    fn finish(self: &Arc<Self>, id: &str, job: Job, result: kestrel_engine::Result<Outcome>) {
         self.live.lock().unwrap().remove(id);
         let mut completed = false;
         self.update(id, |r| {
@@ -755,7 +755,7 @@ impl Manager {
 
     // ------------------------------------------------------------------ torrents
 
-    fn run_torrent(self: &Arc<Self>, record: Record, selection: flux_torrent::Selection, cancel: CancellationToken) {
+    fn run_torrent(self: &Arc<Self>, record: Record, selection: kestrel_torrent::Selection, cancel: CancellationToken) {
         let global = self.settings.read().unwrap().speed_limit;
         let limit = match (record.speed_limit, global) {
             (0, global) => global,
@@ -774,27 +774,27 @@ impl Manager {
                 let manager = manager.clone();
                 let id = id.clone();
                 let selection = selection.clone();
-                move |status: flux_torrent::Status| manager.on_torrent_status(&id, &selection, status)
+                move |status: kestrel_torrent::Status| manager.on_torrent_status(&id, &selection, status)
             };
             let result = match manager.ensure_vpn().await {
                 Err(error) => Err(error),
                 Ok(()) => manager.torrents.download(&selection, &folder, limit, events, cancel).await,
             };
             let result = match result {
-                Ok(flux_torrent::Outcome::Completed) => manager.scan(&folder.join(&selection.name)).await.map(|_| flux_torrent::Outcome::Completed),
+                Ok(kestrel_torrent::Outcome::Completed) => manager.scan(&folder.join(&selection.name)).await.map(|_| kestrel_torrent::Outcome::Completed),
                 other => other,
             };
             manager.live.lock().unwrap().remove(&id);
-            let completed = matches!(result, Ok(flux_torrent::Outcome::Completed));
+            let completed = matches!(result, Ok(kestrel_torrent::Outcome::Completed));
             let error = result.as_ref().err().cloned();
             manager.update(&id, |r| match &result {
-                Ok(flux_torrent::Outcome::Completed) => {
+                Ok(kestrel_torrent::Outcome::Completed) => {
                     r.status = Status::Completed;
                     r.written = r.total.unwrap_or(r.written);
                     r.error = None;
                     r.completed_ms = Some(now_ms());
                 }
-                Ok(flux_torrent::Outcome::Paused) => r.status = Status::Paused,
+                Ok(kestrel_torrent::Outcome::Paused) => r.status = Status::Paused,
                 Err(message) => {
                     r.status = Status::Failed;
                     r.error = Some(message.clone());
@@ -804,7 +804,7 @@ impl Manager {
         });
     }
 
-    fn on_torrent_status(&self, id: &str, selection: &flux_torrent::Selection, status: flux_torrent::Status) {
+    fn on_torrent_status(&self, id: &str, selection: &kestrel_torrent::Selection, status: kestrel_torrent::Status) {
         let seeding = status.state == "seeding";
         let total = if selection.selected_bytes > 0 { selection.selected_bytes } else { status.total };
         self.update(id, |r| {
@@ -832,17 +832,24 @@ impl Manager {
 
     /// Where a video download keeps its parts between pauses.
     fn video_work(record: &Record) -> PathBuf {
-        record.destination.parent().unwrap_or(Path::new("")).join(format!(".flux-video-{}", record.id))
+        let parent = record.destination.parent().unwrap_or(Path::new(""));
+        let work = parent.join(format!(".kestrel-video-{}", record.id));
+        // From before the rename.
+        let old = parent.join(format!(".flux-video-{}", record.id));
+        if !work.exists() && old.is_dir() {
+            let _ = std::fs::rename(&old, &work);
+        }
+        work
     }
 
-    fn run_video(self: &Arc<Self>, record: Record, selection: flux_media::Selection, cancel: CancellationToken) {
+    fn run_video(self: &Arc<Self>, record: Record, selection: kestrel_media::Selection, cancel: CancellationToken) {
         let settings = self.settings.read().unwrap().clone();
         let limit = match (record.speed_limit, settings.speed_limit) {
             (0, global) => global,
             (own, 0) => own,
             (own, global) => own.min(global),
         };
-        let mut job = flux_media::VideoJob {
+        let mut job = kestrel_media::VideoJob {
             page: record.url.clone(),
             destination: record.destination.clone(),
             work: Manager::video_work(&record),
@@ -860,14 +867,14 @@ impl Manager {
             let events = {
                 let manager = manager.clone();
                 let id = id.clone();
-                move |event: flux_media::MediaEvent| manager.on_video_event(&id, event)
+                move |event: kestrel_media::MediaEvent| manager.on_video_event(&id, event)
             };
             let result = match manager.ensure_vpn().await {
                 Err(error) => Err(error),
                 Ok(()) => manager.media.download(&mut job, events, cancel).await,
             };
             let result = match result {
-                Ok(flux_media::Outcome::Completed { path, bytes, sha256 }) => manager.scan(&path).await.map(|_| flux_media::Outcome::Completed { path, bytes, sha256 }),
+                Ok(kestrel_media::Outcome::Completed { path, bytes, sha256 }) => manager.scan(&path).await.map(|_| kestrel_media::Outcome::Completed { path, bytes, sha256 }),
                 other => other,
             };
             manager.live.lock().unwrap().remove(&id);
@@ -876,7 +883,7 @@ impl Manager {
             manager.update(&id, |r| {
                 r.kind = Kind::Video { selection: job.selection.clone() };
                 match &result {
-                    Ok(flux_media::Outcome::Completed { path, bytes, sha256 }) => {
+                    Ok(kestrel_media::Outcome::Completed { path, bytes, sha256 }) => {
                         r.destination = path.clone();
                         r.status = Status::Completed;
                         r.written = *bytes;
@@ -886,7 +893,7 @@ impl Manager {
                         r.completed_ms = Some(now_ms());
                         completed = true;
                     }
-                    Ok(flux_media::Outcome::Paused) => r.status = Status::Paused,
+                    Ok(kestrel_media::Outcome::Paused) => r.status = Status::Paused,
                     Err(message) => {
                         r.status = Status::Failed;
                         r.error = Some(message.clone());
@@ -897,8 +904,8 @@ impl Manager {
         });
     }
 
-    fn on_video_event(&self, id: &str, event: flux_media::MediaEvent) {
-        use flux_media::MediaEvent;
+    fn on_video_event(&self, id: &str, event: kestrel_media::MediaEvent) {
+        use kestrel_media::MediaEvent;
         match event {
             MediaEvent::Tracks(_) => {}
             MediaEvent::Progress { written, total, estimated, bytes_per_second } => {
@@ -1054,7 +1061,7 @@ impl Manager {
                 let Some(index) = records.iter().position(|r| &r.id == id) else { continue };
                 records.remove(index)
             };
-            let part = flux_engine::file::part_path(&record.destination);
+            let part = kestrel_engine::file::part_path(&record.destination);
             let work = matches!(record.kind, Kind::Video { .. }).then(|| Manager::video_work(&record));
             let torrent = matches!(record.kind, Kind::Torrent { .. });
             // A running transfer releases its file a moment after cancelling.
@@ -1090,15 +1097,15 @@ impl Manager {
         if matches!(record.kind, Kind::Torrent { .. }) {
             return Err("A torrent keeps the name its files were shared under.".into());
         }
-        let name = flux_engine::sanitize_file_name(name);
+        let name = kestrel_engine::sanitize_file_name(name);
         let folder = record.destination.parent().unwrap_or(Path::new("")).to_path_buf();
         let target = self.unique(&folder, &name);
         if record.destination.exists() {
             std::fs::rename(&record.destination, &target).map_err(|e| e.to_string())?;
         }
-        let part = flux_engine::file::part_path(&record.destination);
+        let part = kestrel_engine::file::part_path(&record.destination);
         if part.exists() {
-            std::fs::rename(&part, flux_engine::file::part_path(&target)).map_err(|e| e.to_string())?;
+            std::fs::rename(&part, kestrel_engine::file::part_path(&target)).map_err(|e| e.to_string())?;
         }
         self.update(id, |r| { r.destination = target; r.category = category_for(&name).into(); });
         self.save(id);
@@ -1131,12 +1138,12 @@ fn program(dir: &Path, name: &str) -> PathBuf {
     dir.join(format!("{name}{}", std::env::consts::EXE_SUFFIX))
 }
 
-/// The video tools: bundled beside Flux when installed (Linux packages: `../lib/flux`); in a
+/// The video tools: bundled beside Kestrel when installed (Linux packages: `../lib/kestrel`); in a
 /// development build, the repository's copy or the one Flux 1.x installed; on Linux and macOS,
 /// otherwise the system's own yt-dlp and FFmpeg.
 fn video_tools_directory() -> PathBuf {
     let exe = std::env::current_exe().ok().and_then(|p| p.parent().map(Path::to_path_buf)).unwrap_or_default();
-    let mut candidates = vec![exe.join("video-tools"), exe.join("../lib/flux/video-tools"), exe.join("../Resources/video-tools"), exe.join("../../../video-tools")];
+    let mut candidates = vec![exe.join("video-tools"), exe.join("../lib/kestrel/video-tools"), exe.join("../Resources/video-tools"), exe.join("../../../video-tools")];
     if let Some(local) = std::env::var_os("LOCALAPPDATA") {
         candidates.push(PathBuf::from(local).join("Programs").join("Apex Downloader").join("video-tools"));
     }

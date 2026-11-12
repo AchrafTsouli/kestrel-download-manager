@@ -1,7 +1,7 @@
 {
   "bundle": {
     "targets": ["app", "dmg"],
-    "externalBin": ["binaries/flux-nmhost", "binaries/flux-cli"],
+    "externalBin": ["binaries/kestrel-nmhost", "binaries/kestrel-cli"],
     "category": "Utility",
     "macOS": {
       "minimumSystemVersion": "11.0"

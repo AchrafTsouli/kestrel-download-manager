@@ -25,12 +25,12 @@ if (!$Repository) {
   $origin = git -C $root remote get-url origin 2>$null
   if ($origin -match 'github\.com[:/](.+?)(\.git)?$') { $Repository = $Matches[1] } else { throw 'Pass -Repository owner/name (no GitHub origin remote found).' }
 }
-$zip = Join-Path ([IO.Path]::GetTempPath()) ('flux-video-tools-' + [guid]::NewGuid().ToString('N') + '.zip')
+$zip = Join-Path ([IO.Path]::GetTempPath()) ('kestrel-video-tools-' + [guid]::NewGuid().ToString('N') + '.zip')
 $url = "https://github.com/$Repository/releases/download/$Tag/video-tools.zip"
 Write-Output "Downloading $url"
 Invoke-WebRequest -Uri $url -OutFile $zip -UseBasicParsing
 try {
-  $staging = Join-Path ([IO.Path]::GetTempPath()) ('flux-video-tools-' + [guid]::NewGuid().ToString('N'))
+  $staging = Join-Path ([IO.Path]::GetTempPath()) ('kestrel-video-tools-' + [guid]::NewGuid().ToString('N'))
   Expand-Archive -LiteralPath $zip -DestinationPath $staging
   foreach ($file in $manifest.files) {
     $source = Join-Path $staging $file.name

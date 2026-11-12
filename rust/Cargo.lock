@@ -1615,147 +1615,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "flux-app"
-version = "2.0.0"
-dependencies = [
- "arboard",
- "base64 0.22.1",
- "chrono",
- "flux-engine",
- "flux-ipc",
- "flux-media",
- "flux-store",
- "flux-torrent",
- "flux-update",
- "png",
- "regex",
- "reqwest 0.12.28",
- "serde",
- "serde_json",
- "tauri",
- "tauri-build",
- "tauri-plugin-dialog",
- "tauri-plugin-drag",
- "tauri-plugin-notification",
- "tauri-plugin-single-instance",
- "tokio",
- "tokio-util",
- "url",
- "windows-sys 0.59.0",
- "zip",
-]
-
-[[package]]
-name = "flux-cli"
-version = "2.0.0"
-dependencies = [
- "flux-ipc",
- "getrandom 0.2.17",
- "serde_json",
- "tokio",
-]
-
-[[package]]
-name = "flux-engine"
-version = "2.0.0"
-dependencies = [
- "bytes",
- "futures-util",
- "labserver",
- "reqwest 0.12.28",
- "serde",
- "serde_json",
- "sha2",
- "thiserror 2.0.21",
- "tokio",
- "tokio-util",
- "url",
- "windows-sys 0.59.0",
-]
-
-[[package]]
-name = "flux-ipc"
-version = "2.0.0"
-dependencies = [
- "flux-engine",
- "serde",
- "serde_json",
- "sha2",
- "tokio",
- "url",
- "windows-sys 0.59.0",
-]
-
-[[package]]
-name = "flux-media"
-version = "2.0.0"
-dependencies = [
- "flux-engine",
- "pgp",
- "regex",
- "reqwest 0.12.28",
- "serde",
- "serde_json",
- "sha2",
- "tokio",
- "tokio-util",
- "url",
-]
-
-[[package]]
-name = "flux-nmhost"
-version = "2.0.0"
-dependencies = [
- "flux-ipc",
- "flux-store",
- "serde",
- "serde_json",
- "sha2",
- "tokio",
-]
-
-[[package]]
-name = "flux-store"
-version = "2.0.0"
-dependencies = [
- "chacha20poly1305",
- "flux-engine",
- "getrandom 0.2.17",
- "rusqlite",
- "serde",
- "serde_json",
- "thiserror 2.0.21",
- "windows-sys 0.59.0",
-]
-
-[[package]]
-name = "flux-torrent"
-version = "2.0.0"
-dependencies = [
- "flux-engine",
- "getrandom 0.2.17",
- "reqwest 0.12.28",
- "serde",
- "serde_json",
- "sha1",
- "tokio",
- "tokio-util",
-]
-
-[[package]]
-name = "flux-update"
-version = "2.0.0"
-dependencies = [
- "base64 0.22.1",
- "p256",
- "rand_core 0.6.4",
- "reqwest 0.12.28",
- "serde_json",
- "sha2",
- "tokio",
-]
-
-[[package]]
 name = "fnv"
 version = "1.0.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2821,6 +2680,147 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cb26cec98cce3a3d96cbb7bced3c4b16e3d13f27ec56dbd62cbc8f39cfb9d653"
 dependencies = [
  "cpufeatures 0.2.17",
+]
+
+[[package]]
+name = "kestrel-app"
+version = "2.0.0"
+dependencies = [
+ "arboard",
+ "base64 0.22.1",
+ "chrono",
+ "kestrel-engine",
+ "kestrel-ipc",
+ "kestrel-media",
+ "kestrel-store",
+ "kestrel-torrent",
+ "kestrel-update",
+ "png",
+ "regex",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-dialog",
+ "tauri-plugin-drag",
+ "tauri-plugin-notification",
+ "tauri-plugin-single-instance",
+ "tokio",
+ "tokio-util",
+ "url",
+ "windows-sys 0.59.0",
+ "zip",
+]
+
+[[package]]
+name = "kestrel-cli"
+version = "2.0.0"
+dependencies = [
+ "getrandom 0.2.17",
+ "kestrel-ipc",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
+name = "kestrel-engine"
+version = "2.0.0"
+dependencies = [
+ "bytes",
+ "futures-util",
+ "labserver",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "sha2",
+ "thiserror 2.0.21",
+ "tokio",
+ "tokio-util",
+ "url",
+ "windows-sys 0.59.0",
+]
+
+[[package]]
+name = "kestrel-ipc"
+version = "2.0.0"
+dependencies = [
+ "kestrel-engine",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tokio",
+ "url",
+ "windows-sys 0.59.0",
+]
+
+[[package]]
+name = "kestrel-media"
+version = "2.0.0"
+dependencies = [
+ "kestrel-engine",
+ "pgp",
+ "regex",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tokio",
+ "tokio-util",
+ "url",
+]
+
+[[package]]
+name = "kestrel-nmhost"
+version = "2.0.0"
+dependencies = [
+ "kestrel-ipc",
+ "kestrel-store",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tokio",
+]
+
+[[package]]
+name = "kestrel-store"
+version = "2.0.0"
+dependencies = [
+ "chacha20poly1305",
+ "getrandom 0.2.17",
+ "kestrel-engine",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "windows-sys 0.59.0",
+]
+
+[[package]]
+name = "kestrel-torrent"
+version = "2.0.0"
+dependencies = [
+ "getrandom 0.2.17",
+ "kestrel-engine",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "sha1",
+ "tokio",
+ "tokio-util",
+]
+
+[[package]]
+name = "kestrel-update"
+version = "2.0.0"
+dependencies = [
+ "base64 0.22.1",
+ "p256",
+ "rand_core 0.6.4",
+ "reqwest 0.12.28",
+ "serde_json",
+ "sha2",
+ "tokio",
 ]
 
 [[package]]
@@ -4174,8 +4174,8 @@ name = "release-signer"
 version = "2.0.0"
 dependencies = [
  "base64 0.22.1",
- "flux-store",
- "flux-update",
+ "kestrel-store",
+ "kestrel-update",
  "p256",
  "serde_json",
  "sha2",

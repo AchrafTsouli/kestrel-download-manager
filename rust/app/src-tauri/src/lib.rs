@@ -1,4 +1,4 @@
-//! Flux 2.0's desktop app: windows, tray, scheduler and commands on top of the download manager.
+//! Kestrel 2.0's desktop app: windows, tray, scheduler and commands on top of the download manager.
 
 mod bridge;
 mod crash;
@@ -37,10 +37,10 @@ pub struct Pending {
     pub probe: Option<Probe>,
     /// What the video picker found (kept so the choice is checked against it).
     #[serde(skip)]
-    pub video: Option<flux_media::Probe>,
+    pub video: Option<kestrel_media::Probe>,
     /// The torrent's file list, once read.
     #[serde(skip)]
-    pub torrent: Option<flux_torrent::Info>,
+    pub torrent: Option<kestrel_torrent::Info>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -50,10 +50,10 @@ pub struct PendingRequest {
     pub file_name: Option<String>,
     pub description: Option<String>,
     #[serde(skip_serializing)]
-    pub session: Option<flux_engine::Session>,
+    pub session: Option<kestrel_engine::Session>,
     pub request_id: Option<String>,
     /// A quality already chosen (in the browser's video panel or the picker).
-    pub video: Option<flux_media::Selection>,
+    pub video: Option<kestrel_media::Selection>,
     /// Download the page itself, not its video.
     #[serde(skip)]
     pub as_file: bool,
@@ -108,7 +108,7 @@ fn open_torrent(app: &AppHandle, pending_id: &str) {
 }
 /// A magnet link or a .torrent file on this computer.
 fn is_torrent_source(text: &str) -> bool {
-    flux_torrent::magnet_hash(text).is_some() || text.to_ascii_lowercase().ends_with(".torrent") && std::path::Path::new(text).is_file()
+    kestrel_torrent::magnet_hash(text).is_some() || text.to_ascii_lowercase().ends_with(".torrent") && std::path::Path::new(text).is_file()
 }
 fn open_video(app: &AppHandle, pending_id: &str) {
     open_window(app, &format!("video-{pending_id}"), "Download video", 640.0, 560.0, true);
@@ -139,7 +139,7 @@ pub fn offer(app: &AppHandle, request: PendingRequest, force_dialog: bool) -> Re
         return Ok(None);
     }
     // A video page without a chosen quality opens the quality list first.
-    if request.video.is_none() && !request.as_file && manager.media.available() && flux_media::pages::is_known_video_page(&request.url) {
+    if request.video.is_none() && !request.as_file && manager.media.available() && kestrel_media::pages::is_known_video_page(&request.url) {
         let pending_id = pending_id();
         app.state::<Windows>().pending.lock().unwrap().insert(pending_id.clone(), Pending { id: pending_id.clone(), request, probe: None, video: None, torrent: None });
         open_video(app, &pending_id);
@@ -177,12 +177,12 @@ pub fn offer(app: &AppHandle, request: PendingRequest, force_dialog: bool) -> Re
 }
 
 /// The start dialog's file information for a chosen video quality.
-fn video_probe(manager: &Manager, request: &PendingRequest, selection: &flux_media::Selection) -> Probe {
+fn video_probe(manager: &Manager, request: &PendingRequest, selection: &kestrel_media::Selection) -> Probe {
     let category = if selection.audio_only { "Music" } else { "Video" };
     let stem = request.file_name.as_deref().map(|n| std::path::Path::new(n).file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default()).filter(|s| !s.trim().is_empty()).unwrap_or_else(|| "Video".into());
     Probe {
         url: request.url.clone(),
-        file_name: flux_engine::sanitize_file_name(&format!("{stem}.{}", selection.extension)),
+        file_name: kestrel_engine::sanitize_file_name(&format!("{stem}.{}", selection.extension)),
         total: selection.total_bytes,
         resumable: true,
         content_type: None,
@@ -217,7 +217,7 @@ fn save_settings(app: AppHandle, manager: Mgr, settings: Settings) -> Result<(),
 #[tauri::command]
 async fn offer_url(app: AppHandle, url: String, file_name: Option<String>, login: Option<String>, password: Option<String>) -> Result<Option<String>, String> {
     let url = url.trim().to_string();
-    if !(url.starts_with("http://") || url.starts_with("https://") || flux_torrent::magnet_hash(&url).is_some()) {
+    if !(url.starts_with("http://") || url.starts_with("https://") || kestrel_torrent::magnet_hash(&url).is_some()) {
         return Err("Enter a full address starting with http:// or https://, or a magnet link.".into());
     }
     // "Use authorization": the login goes with this download only, as HTTP Basic authentication.
@@ -225,7 +225,7 @@ async fn offer_url(app: AppHandle, url: String, file_name: Option<String>, login
         Some(login) => {
             use base64::Engine;
             let parsed = url::Url::parse(&url).map_err(|e| e.to_string())?;
-            let mut session = flux_engine::Session::for_url(&parsed);
+            let mut session = kestrel_engine::Session::for_url(&parsed);
             let token = base64::engine::general_purpose::STANDARD.encode(format!("{login}:{}", password.unwrap_or_default()));
             session.authorization = Some(format!("Basic {token}"));
             Some(session)
@@ -273,7 +273,7 @@ async fn file_icon(manager: Mgr<'_>, id: String) -> Result<Option<String>, Strin
     if !done && is_exe && matches!(record.kind, model::Kind::Http) {
         use base64::Engine;
         let url = |bytes: &[u8]| format!("data:image/x-icon;base64,{}", base64::engine::general_purpose::STANDARD.encode(bytes));
-        let saved = flux_store::default_directory().join("icons").join(format!("{id}.ico"));
+        let saved = kestrel_store::default_directory().join("icons").join(format!("{id}.ico"));
         if let Ok(bytes) = std::fs::read(&saved) {
             return Ok(Some(url(&bytes)));
         }
@@ -350,7 +350,7 @@ fn cancel_pending(windows: State<'_, Windows>, id: String) {
 
 /// The video picker's list: one video's qualities or a playlist's entries.
 #[tauri::command]
-async fn probe_video(manager: Mgr<'_>, windows: State<'_, Windows>, id: String) -> Result<flux_media::Probe, String> {
+async fn probe_video(manager: Mgr<'_>, windows: State<'_, Windows>, id: String) -> Result<kestrel_media::Probe, String> {
     let request = windows.pending.lock().unwrap().get(&id).map(|p| p.request.clone()).ok_or("This download was already added or cancelled.")?;
     let session = request.session.clone().filter(|s| url::Url::parse(&request.url).is_ok_and(|u| s.validate(&u).is_ok()));
     let cancel = tokio_util::sync::CancellationToken::new();
@@ -400,12 +400,12 @@ async fn confirm_video(app: AppHandle, manager: Mgr<'_>, windows: State<'_, Wind
     let pending = windows.pending.lock().unwrap().get(&choice.pending_id).cloned().ok_or("This download was already added or cancelled.")?;
     let found = pending.video.clone().ok_or("The quality list is not ready yet.")?;
     if let Some(playlist) = found.playlist {
-        let mut preset = flux_media::Selection::preset(choice.max_height, choice.audio_only);
+        let mut preset = kestrel_media::Selection::preset(choice.max_height, choice.audio_only);
         preset.subtitles = choice.subtitles.clone().filter(|_| !choice.audio_only);
         let category = if choice.audio_only { "Music" } else { "Video" };
         let mut folder = manager.folder_for(category);
         if choice.subfolder {
-            folder = folder.join(flux_engine::sanitize_file_name(&playlist.title).trim_end_matches('.'));
+            folder = folder.join(kestrel_engine::sanitize_file_name(&playlist.title).trim_end_matches('.'));
         }
         let mut added = 0;
         let mut last_error = None;
@@ -445,7 +445,7 @@ async fn confirm_video(app: AppHandle, manager: Mgr<'_>, windows: State<'_, Wind
     selection.subtitles = choice.subtitles.clone().filter(|_| !selection.audio_only && !selection.is_clip());
     selection.validate(&pending.request.url)?;
     let part = if selection.is_clip() { format!(" (part {}-{})", clock_name(selection.clip_start.unwrap_or(0.0)), selection.clip_end.map_or("end".to_string(), clock_name)) } else { String::new() };
-    let name = flux_engine::sanitize_file_name(&format!("{}{part} ({}).{}", catalog.title, selection.quality(), selection.extension));
+    let name = kestrel_engine::sanitize_file_name(&format!("{}{part} ({}).{}", catalog.title, selection.quality(), selection.extension));
     let mut request = pending.request.clone();
     request.file_name = Some(name);
     request.video = Some(selection);
@@ -460,7 +460,7 @@ async fn confirm_video(app: AppHandle, manager: Mgr<'_>, windows: State<'_, Wind
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct TorrentOffer {
-    info: flux_torrent::Info,
+    info: kestrel_torrent::Info,
     folder: String,
 }
 #[tauri::command]
@@ -496,23 +496,23 @@ struct TorrentChoice {
 async fn confirm_torrent(app: AppHandle, manager: Mgr<'_>, windows: State<'_, Windows>, choice: TorrentChoice) -> Result<String, String> {
     let pending = windows.pending.lock().unwrap().get(&choice.pending_id).cloned().ok_or("This download was already added or cancelled.")?;
     let info = pending.torrent.ok_or("The torrent's file list is not ready yet.")?;
-    let chosen: Vec<&flux_torrent::TorrentFile> = info.files.iter().filter(|f| choice.files.contains(&f.index)).collect();
+    let chosen: Vec<&kestrel_torrent::TorrentFile> = info.files.iter().filter(|f| choice.files.contains(&f.index)).collect();
     if chosen.is_empty() {
         return Err("Choose at least one file.".into());
     }
     if !std::path::Path::new(&choice.folder).is_absolute() {
         return Err("Choose a folder to save the torrent in.".into());
     }
-    let selection = flux_torrent::Selection {
+    let selection = kestrel_torrent::Selection {
         info_hash: info.info_hash.clone(),
         name: info.name.clone(),
-        metadata_file: flux_torrent::metadata_path(&manager.torrents.cache, &info.info_hash),
+        metadata_file: kestrel_torrent::metadata_path(&manager.torrents.cache, &info.info_hash),
         // Every file chosen: no list, so aria2 takes the whole torrent.
         files: if chosen.len() == info.files.len() { Vec::new() } else { chosen.iter().map(|f| f.index).collect() },
         selected_bytes: chosen.iter().map(|f| f.length).sum(),
         seed_minutes: choice.seed_minutes.min(1440),
     };
-    let id = manager.add(AddRequest { url: flux_torrent::magnet(&info.info_hash, &info.name), folder: Some(choice.folder), start: Some(choice.start.clone()), request_id: pending.request.request_id, torrent: Some(selection), ..Default::default() })?;
+    let id = manager.add(AddRequest { url: kestrel_torrent::magnet(&info.info_hash, &info.name), folder: Some(choice.folder), start: Some(choice.start.clone()), request_id: pending.request.request_id, torrent: Some(selection), ..Default::default() })?;
     windows.pending.lock().unwrap().remove(&choice.pending_id);
     if choice.start == "now" && manager.settings.read().unwrap().show_progress_window {
         open_progress(&app, &id);
@@ -676,9 +676,9 @@ fn exit_app(app: AppHandle) {
 /// Registers this copy's browser bridge for Chrome, Edge and Brave (the installer does it too).
 #[tauri::command]
 async fn register_browsers() -> Result<String, String> {
-    let host = std::env::current_exe().map_err(|e| e.to_string())?.with_file_name(format!("flux-nmhost{}", std::env::consts::EXE_SUFFIX));
+    let host = std::env::current_exe().map_err(|e| e.to_string())?.with_file_name(format!("kestrel-nmhost{}", std::env::consts::EXE_SUFFIX));
     if !host.exists() {
-        return Err("flux-nmhost.exe is missing beside Kestrel.".into());
+        return Err("kestrel-nmhost.exe is missing beside Kestrel.".into());
     }
     let mut command = std::process::Command::new(host);
     command.arg("--register");
@@ -703,7 +703,7 @@ fn test_browsers() -> Vec<BrowserCheck> {
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
-        let host = std::env::current_exe().map(|e| e.with_file_name("flux-nmhost.exe")).unwrap_or_default();
+        let host = std::env::current_exe().map(|e| e.with_file_name("kestrel-nmhost.exe")).unwrap_or_default();
         [("Google Chrome", r"Google\Chrome"), ("Microsoft Edge", r"Microsoft\Edge"), ("Brave", r"BraveSoftware\Brave-Browser"), ("Mozilla Firefox", "Mozilla")]
             .into_iter()
             .map(|(name, key)| {
@@ -744,7 +744,7 @@ async fn check_updates(app: AppHandle) -> Result<updates::UpdateInfo, String> {
 async fn install_update(app: AppHandle) -> Result<(), String> {
     updates::install(&app).await
 }
-/// What the windows need to drag a finished file out of Flux (to Explorer, a mail, a chat).
+/// What the windows need to drag a finished file out of Kestrel (to Explorer, a mail, a chat).
 #[derive(Serialize)]
 struct DragItem {
     path: String,
@@ -944,15 +944,15 @@ fn tray(app: &AppHandle) -> tauri::Result<()> {
             if look == shown {
                 continue;
             }
-            if let (Some(tray), Ok(menu)) = (handle.tray_by_id("flux"), tray_menu(&handle, &look)) {
+            if let (Some(tray), Ok(menu)) = (handle.tray_by_id("kestrel"), tray_menu(&handle, &look)) {
                 let _ = tray.set_menu(Some(menu));
             }
             shown = look;
         }
     });
-    TrayIconBuilder::with_id("flux")
+    TrayIconBuilder::with_id("kestrel")
         .icon(app.default_window_icon().cloned().expect("app icon"))
-        .tooltip("Flux")
+        .tooltip("Kestrel")
         .menu(&menu)
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id.as_ref() {
@@ -984,9 +984,16 @@ fn tray(app: &AppHandle) -> tauri::Result<()> {
 }
 
 pub fn run() {
+    // The app's identifier was com.achraftsouli.flux before the rename: its window data moves once.
+    if let Some(local) = std::env::var_os("LOCALAPPDATA").map(std::path::PathBuf::from) {
+        let (old, new) = (local.join("com.achraftsouli.flux"), local.join("com.achraftsouli.kestrel"));
+        if !new.exists() && old.is_dir() {
+            let _ = std::fs::rename(old, new);
+        }
+    }
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
-            // A second start (or a link passed on the command line) goes to the running Flux.
+            // A second start (or a link passed on the command line) goes to the running Kestrel.
             show_main(app);
             if let Some(url) = args.iter().skip(1).find(|a| a.starts_with("http://") || a.starts_with("https://") || is_torrent_source(a)).cloned() {
                 // Off the main thread: opening a window from it would wait on itself.
@@ -1005,7 +1012,7 @@ pub fn run() {
             system::hold_running_mutex();
             // Off the start-up path: a few registry reads, and a registration when it is missing.
             std::thread::spawn(system::ensure_browser_bridge);
-            let data_dir = flux_store::default_directory();
+            let data_dir = kestrel_store::default_directory();
             let manager = Manager::open(handle.clone(), &data_dir).map_err(Box::<dyn std::error::Error>::from)?;
             app.manage(manager.clone());
             // The first start: how to add the browser extension (until it is in the stores).
@@ -1059,7 +1066,7 @@ pub fn run() {
             bridge::serve(handle.clone());
             media::keep_tools_current(handle.clone());
             updates::check_daily(handle.clone());
-            // The main window starts hidden; Flux started by Windows or the browser stays in the tray.
+            // The main window starts hidden; Kestrel started by Windows or the browser stays in the tray.
             if !std::env::args().any(|a| a == "--background")
                 && let Some(window) = handle.get_webview_window("main") { let _ = window.show(); let _ = window.set_focus(); }
             Ok(())

@@ -1,5 +1,5 @@
 //! Magnet links from the browser.
-use flux_ipc::Response;
+use kestrel_ipc::Response;
 use tauri::AppHandle;
 
 use crate::{PendingRequest, offer};

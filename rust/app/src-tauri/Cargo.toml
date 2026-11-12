@@ -1,17 +1,17 @@
 [package]
-name = "flux-app"
-description = "Flux desktop app (Tauri 2)"
+name = "kestrel-app"
+description = "Kestrel desktop app (Tauri 2)"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 publish = false
 
 [[bin]]
-name = "flux"
+name = "kestrel"
 path = "src/main.rs"
 
 [lib]
-name = "flux_app_lib"
+name = "kestrel_app_lib"
 crate-type = ["rlib"]
 
 [build-dependencies]
@@ -31,12 +31,12 @@ base64 = "0.22"
 png = "0.18"
 reqwest.workspace = true
 zip = { version = "2", default-features = false, features = ["deflate"] }
-flux-engine.workspace = true
-flux-store.workspace = true
-flux-ipc.workspace = true
-flux-media.workspace = true
-flux-torrent.workspace = true
-flux-update.workspace = true
+kestrel-engine.workspace = true
+kestrel-store.workspace = true
+kestrel-ipc.workspace = true
+kestrel-media.workspace = true
+kestrel-torrent.workspace = true
+kestrel-update.workspace = true
 arboard = { version = "3", default-features = false }
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 tauri-plugin-drag = "2"

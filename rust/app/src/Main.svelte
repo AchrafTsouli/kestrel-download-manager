@@ -270,7 +270,7 @@
   const actionName: Record<string, string> = { exit: "Kestrel will close", sleep: "The computer will sleep", hibernate: "The computer will hibernate", shutdown: "The computer will shut down" };
 
   type MenuItem = { label: string; run?: () => void; disabled?: () => boolean; check?: () => boolean; key?: string; sep?: boolean; sub?: () => MenuItem[] };
-  const HOME = "https://github.com/AchrafTsouli/flux-downloader";
+  const HOME = "https://github.com/AchrafTsouli/kestrel-download-manager";
   const web = (url: string) => { call("open_folder", { path: url }); menu = null; };
   const linkPattern = /^(https?:\/\/|magnet:\?)\S+$/i;
   // Opens the batch window with these links already filled in (the window reads them once).
@@ -457,7 +457,7 @@
       <button class="tool" onclick={() => showWindow("scheduler")}><Icon name="scheduler" /><span>Scheduler</span></button>
       <button class="tool" onclick={() => toggleQueue(currentQueue)} disabled={runningQueues.includes(currentQueue)} title={"Start " + currentQueue}><Icon name="startQueue" /><span>Start Qu…</span></button>
       <button class="tool" onclick={() => toggleQueue(currentQueue)} disabled={!runningQueues.includes(currentQueue)} title={"Stop " + currentQueue}><Icon name="stopQueue" /><span>Stop Qu…</span></button>
-      <button class="tool" onclick={() => { navigator.clipboard?.writeText("Kestrel, a free download manager: https://github.com/AchrafTsouli/flux-downloader"); message = "Link to Kestrel copied. Paste it to a friend."; }}><Icon name="share" /><span>Tell a Friend</span></button>
+      <button class="tool" onclick={() => { navigator.clipboard?.writeText("Kestrel, a free download manager: https://github.com/AchrafTsouli/kestrel-download-manager"); message = "Link to Kestrel copied. Paste it to a friend."; }}><Icon name="share" /><span>Tell a Friend</span></button>
     </div>
   {/if}
 
@@ -693,7 +693,7 @@
   <div class="scrim" role="presentation" onmousedown={(e) => e.target === e.currentTarget && (about = false)}>
     <div class="dialog small" role="dialog" aria-labelledby="about-title">
       <div class="dialog-title" id="about-title">About Kestrel</div>
-      <div class="dialog-body about"><img src="/logo.png" alt="" width="48" height="48" /><div><b>Kestrel {version}</b><p>Rust engine · Tauri interface · MIT licence</p><p class="muted">github.com/AchrafTsouli/flux-downloader</p></div></div>
+      <div class="dialog-body about"><img src="/logo.png" alt="" width="48" height="48" /><div><b>Kestrel {version}</b><p>Rust engine · Tauri interface · MIT licence</p><p class="muted">github.com/AchrafTsouli/kestrel-download-manager</p></div></div>
       <div class="dialog-actions"><button class="btn primary" onclick={() => (about = false)}>OK</button></div>
     </div>
   </div>

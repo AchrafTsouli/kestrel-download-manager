@@ -1,9 +1,9 @@
-# Packs Flux's browser extension for the stores (nothing is uploaded):
-#   installers\flux-extension-<version>-chromium.zip  Chrome Web Store, Microsoft Edge Add-ons
-#   installers\flux-extension-<version>-firefox.zip   Firefox Add-ons (AMO)
+# Packs Kestrel's browser extension for the stores (nothing is uploaded):
+#   installers\kestrel-extension-<version>-chromium.zip  Chrome Web Store, Microsoft Edge Add-ons
+#   installers\kestrel-extension-<version>-firefox.zip   Firefox Add-ons (AMO)
 # Store uploads may not carry the fixed "key"; each store gives the extension its own ID, which
-# the browser bridge must then accept: add it to installer/Flux2.iss (ExtensionId) and run
-# flux-nmhost --register <id>. See docs/STORE-LISTING.md.
+# the browser bridge must then accept: add it to installer/Kestrel.iss (ExtensionId) and run
+# kestrel-nmhost --register <id>. See docs/STORE-LISTING.md.
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 $source = Join-Path $root 'BrowserExtension'
@@ -26,7 +26,7 @@ function Pack([string]$flavor, [scriptblock]$adapt) {
     $m.PSObject.Properties.Remove('key')
     & $adapt $m
     [IO.File]::WriteAllText((Join-Path $dir 'manifest.json'), ($m | ConvertTo-Json -Depth 10), (New-Object Text.UTF8Encoding($false)))
-    $zip = Join-Path $output "flux-extension-$version-$flavor.zip"
+    $zip = Join-Path $output "kestrel-extension-$version-$flavor.zip"
     if (Test-Path -LiteralPath $zip) { Remove-Item -LiteralPath $zip }
     Compress-Archive -Path (Join-Path $dir '*') -DestinationPath $zip
     Write-Output ('{0}: {1} ({2:N0} KB)' -f $flavor, $zip, ((Get-Item $zip).Length / 1KB))
@@ -38,7 +38,7 @@ Pack 'firefox' {
     # Firefox runs MV3 background pages as scripts, not service workers, and knows no "split" mode.
     $m.background = [pscustomobject]@{ scripts = @('background.js'); type = 'module' }
     $m.incognito = 'spanning'
-    $m | Add-Member -NotePropertyName browser_specific_settings -NotePropertyValue ([pscustomobject]@{ gecko = [pscustomobject]@{ id = 'flux@achraftsouli.github.io'; strict_min_version = '128.0' } })
+    $m | Add-Member -NotePropertyName browser_specific_settings -NotePropertyValue ([pscustomobject]@{ gecko = [pscustomobject]@{ id = 'kestrel@achraftsouli.github.io'; strict_min_version = '128.0' } })
     foreach ($script in $m.content_scripts) { $script.PSObject.Properties.Remove('match_origin_as_fallback') }
 }
 Remove-Item -LiteralPath $work -Recurse -Force

@@ -4,7 +4,7 @@
 
 <p align="center">A fast, free download manager for Windows, with browser capture, video downloads and torrents.<br>No ads, no trial timer, no account.</p>
 
-<p align="center"><a href="https://github.com/AchrafTsouli/flux-downloader/releases/latest"><b>Download the latest installer</b></a></p>
+<p align="center"><a href="https://github.com/AchrafTsouli/kestrel-download-manager/releases/latest"><b>Download the latest installer</b></a></p>
 
 Kestrel is the new name of Flux. Version 2.0 is a rewrite in Rust: smaller, faster to start and
 lighter on memory, with the same windows you know from IDM. It installs over Flux 1.x and keeps your
@@ -29,7 +29,7 @@ downloads, settings and site logins.
 
 ## Install
 
-1. Download `Kestrel-Setup-<version>-win-x64.exe` from [Releases](https://github.com/AchrafTsouli/flux-downloader/releases/latest) and run it. It needs 64-bit Windows 10 22H2 or Windows 11, with Microsoft Edge WebView2 (built into Windows 11 and current Windows 10), and no administrator rights.
+1. Download `Kestrel-Setup-<version>-win-x64.exe` from [Releases](https://github.com/AchrafTsouli/kestrel-download-manager/releases/latest) and run it. It needs 64-bit Windows 10 22H2 or Windows 11, with Microsoft Edge WebView2 (built into Windows 11 and current Windows 10), and no administrator rights.
 2. On first start, Kestrel opens **Add the browser extension**: open your browser's extensions page from there, turn on **Developer mode**, choose **Load unpacked** and select the folder it shows. You can open the guide again from **Help → Add the browser extension…**.
 
 Windows SmartScreen may warn about the installer because it is not code-signed yet. Choose **More info → Run anyway**.
@@ -39,14 +39,14 @@ Windows SmartScreen may warn about the installer because it is not code-signed y
 Requirements: Windows, [Rust](https://rustup.rs) (stable, 1.88 or newer), [Node.js 22](https://nodejs.org) and [PowerShell 7.4+](https://learn.microsoft.com/powershell/scripting/install/installing-powershell-on-windows).
 
 ```powershell
-git clone https://github.com/AchrafTsouli/flux-downloader.git
-cd flux-downloader
+git clone https://github.com/AchrafTsouli/kestrel-download-manager.git
+cd kestrel-download-manager
 pwsh scripts/Get-VideoTools.ps1           # yt-dlp, FFmpeg, QuickJS and aria2, checked against video-tools/sources.json
 cd rust/app; npm ci; cd ../..
-pwsh scripts/Build-Test.ps1               # quick build: rust/target/release/flux.exe
+pwsh scripts/Build-Test.ps1               # quick build: rust/target/release/kestrel.exe
 ```
 
-The installer: `pwsh scripts/Install-InnoCompiler.ps1` once, then `pwsh scripts/Build-Flux2Installer.ps1`. The result is written to `installers/`.
+The installer: `pwsh scripts/Install-InnoCompiler.ps1` once, then `pwsh scripts/Build-Installer.ps1`. The result is written to `installers/`.
 
 Tests:
 
@@ -67,16 +67,16 @@ Installed copies (Kestrel and Flux 1.x) check `releases/latest/download/version.
 | Folder | Contents |
 |---|---|
 | `rust/app/` | The desktop app: Tauri 2 shell (`src-tauri/`) and Svelte windows (`src/`) |
-| `rust/crates/flux-engine/` | Download engine: segmented HTTP, one sparse file, resume, limits |
-| `rust/crates/flux-store/` | History and settings (SQLite), encrypted for the Windows account |
-| `rust/crates/flux-media/`, `flux-torrent/` | Videos (yt-dlp, FFmpeg) and torrents (aria2) |
-| `rust/crates/flux-ipc/`, `flux-nmhost/` | Browser bridge: native messaging host and named pipe |
-| `rust/crates/flux-update/`, `flux-cli/` | Signed updates; command-line tool |
+| `rust/crates/kestrel-engine/` | Download engine: segmented HTTP, one sparse file, resume, limits |
+| `rust/crates/kestrel-store/` | History and settings (SQLite), encrypted for the Windows account |
+| `rust/crates/kestrel-media/`, `kestrel-torrent/` | Videos (yt-dlp, FFmpeg) and torrents (aria2) |
+| `rust/crates/kestrel-ipc/`, `kestrel-nmhost/` | Browser bridge: native messaging host and named pipe |
+| `rust/crates/kestrel-update/`, `kestrel-cli/` | Signed updates; command-line tool |
 | `rust/tools/` | Local test server (`labserver`) and the release signer |
 | `BrowserExtension/` | The browser extension |
 | `installer/`, `scripts/` | Inno Setup installer and the build and release scripts |
 
-Some internal names (`flux-*`, `com.swiftfetch.bridge`) date from before the rename and are kept so existing installations and the published extension keep working.
+The browser host name `com.swiftfetch.bridge` dates from before the rename and is kept so existing installations and the published extension keep working. Data, unfinished downloads and settings from Flux carry over by themselves.
 
 ## License
 

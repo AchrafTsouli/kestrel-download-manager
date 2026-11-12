@@ -1,10 +1,10 @@
-//! Unpacking finished archives (when enabled in Options): zip inside Flux, 7z/rar/tar through an
+//! Unpacking finished archives (when enabled in Options): zip inside Kestrel, 7z/rar/tar through an
 //! installed 7-Zip. Everything goes into a new folder named after the archive, never over existing
 //! files, and no entry can escape that folder.
 
 use std::path::{Path, PathBuf};
 
-/// The archive kinds Flux can unpack, by file name.
+/// The archive kinds Kestrel can unpack, by file name.
 pub fn is_archive(path: &Path) -> bool {
     let name = path.file_name().map(|n| n.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
     [".zip", ".7z", ".rar", ".tar", ".tar.gz", ".tgz", ".tar.xz", ".tar.bz2"].iter().any(|e| name.ends_with(e))
@@ -163,7 +163,7 @@ mod tests {
 
     #[test]
     fn a_zip_unpacks_into_its_own_new_folder() {
-        let dir = std::env::temp_dir().join(format!("flux-extract-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("kestrel-extract-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let archive = dir.join("Course.zip");
         make_zip(&archive, &[("a.txt", b"one"), ("sub/b.txt", b"two")]);
@@ -177,7 +177,7 @@ mod tests {
 
     #[test]
     fn entries_cannot_escape_the_folder() {
-        let dir = std::env::temp_dir().join(format!("flux-extract-evil-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("kestrel-extract-evil-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let archive = dir.join("evil.zip");
         make_zip(&archive, &[("ok.txt", b"x"), ("../escaped.txt", b"bad")]);

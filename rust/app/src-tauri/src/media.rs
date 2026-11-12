@@ -2,7 +2,7 @@
 
 use std::time::{Duration, SystemTime};
 
-use flux_ipc::{Request, Response};
+use kestrel_ipc::{Request, Response};
 use tauri::{AppHandle, Emitter, Manager as _};
 
 use crate::manager::Shared;
@@ -28,7 +28,7 @@ pub async fn formats(app: &AppHandle, request: &Request) -> Response {
 
 /// A quality chosen in the browser's video panel.
 pub async fn download(app: &AppHandle, request: &Request) -> Response {
-    let selection: flux_media::Selection = match request.video.clone().map(serde_json::from_value) {
+    let selection: kestrel_media::Selection = match request.video.clone().map(serde_json::from_value) {
         Some(Ok(selection)) => selection,
         _ => return Response::error("Invalid video format selection."),
     };
@@ -56,7 +56,7 @@ pub fn keep_tools_current(app: AppHandle) {
             if manager.settings.read().unwrap().auto_update_tools && manager.media.available() && due {
                 let _ = std::fs::create_dir_all(&manager.media.update_directory);
                 let _ = std::fs::write(&marker, b"");
-                if let Ok(Some(version)) = flux_media::update::update(&manager.media.directory, &manager.media.update_directory).await {
+                if let Ok(Some(version)) = kestrel_media::update::update(&manager.media.directory, &manager.media.update_directory).await {
                     let _ = app.emit("message", format!("Video support updated (yt-dlp {version})."));
                 }
             }

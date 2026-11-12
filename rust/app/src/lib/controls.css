@@ -1,4 +1,4 @@
-/* Shared controls for Flux's secondary windows. */
+/* Shared controls for Kestrel's secondary windows. */
 .win { display: grid; grid-template-rows: 1fr auto; height: 100%; background: var(--surface); }
 .win-body { padding: 14px 16px; overflow: auto; display: grid; gap: 10px; align-content: start; }
 .win-actions { display: flex; justify-content: flex-end; gap: 8px; padding: 10px 16px; background: var(--chrome); border-top: 1px solid var(--line); }

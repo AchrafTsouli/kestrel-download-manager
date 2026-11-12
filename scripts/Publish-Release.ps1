@@ -16,7 +16,7 @@ try {
   if (!$repo) { throw 'Run gh auth login and make sure the origin remote points at GitHub.' }
   if (gh release view $tag 2>$null) { throw "Release $tag already exists. Bump the version in rust/Cargo.toml first." }
 
-  & (Join-Path $PSScriptRoot 'Build-Flux2Installer.ps1')
+  & (Join-Path $PSScriptRoot 'Build-Installer.ps1')
   if ($LASTEXITCODE -ne 0) { throw 'The installer build failed.' }
   $name = "Kestrel-Setup-$version-win-x64.exe"
   $installer = Join-Path $root "installers/$name"

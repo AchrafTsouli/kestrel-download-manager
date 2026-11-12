@@ -1,4 +1,4 @@
-//! Crash reports, opt-in each time. When Flux stops on an internal error it writes what happened
+//! Crash reports, opt-in each time. When Kestrel stops on an internal error it writes what happened
 //! (version, system, the error and where it happened: no file names, addresses or settings) to
 //! `<data>/crashes`. On the next start the main window offers to open it as a GitHub issue, which
 //! the user reads and sends from the browser, or to dismiss it.
@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use serde::Serialize;
 
 fn folder() -> PathBuf {
-    flux_store::default_directory().join("crashes")
+    kestrel_store::default_directory().join("crashes")
 }
 
 /// Records internal errors (Rust panics) before the default handling runs.
@@ -79,7 +79,7 @@ pub fn issue_url(id: &str) -> Result<String, String> {
     let error = text.lines().find_map(|l| l.strip_prefix("Error: ")).unwrap_or("crash");
     let title = format!("Crash: {}", error.chars().take(80).collect::<String>());
     let body = format!("Kestrel closed unexpectedly.\n\nWhat I was doing:\n\n\n---\n```\n{text}```\n");
-    Ok(format!("https://github.com/AchrafTsouli/flux-downloader/issues/new?title={}&body={}", encode(&title), encode(&body)))
+    Ok(format!("https://github.com/AchrafTsouli/kestrel-download-manager/issues/new?title={}&body={}", encode(&title), encode(&body)))
 }
 
 #[cfg(test)]

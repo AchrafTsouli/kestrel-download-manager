@@ -8,17 +8,17 @@ edition = "2024"
 rust-version = "1.88"
 license = "MIT"
 authors = ["Achraf Tsouli"]
-repository = "https://github.com/AchrafTsouli/flux-downloader"
+repository = "https://github.com/AchrafTsouli/kestrel-download-manager"
 publish = false
 
 [workspace.dependencies]
-flux-engine = { path = "crates/flux-engine" }
-flux-store = { path = "crates/flux-store" }
-flux-ipc = { path = "crates/flux-ipc" }
-flux-media = { path = "crates/flux-media" }
-flux-torrent = { path = "crates/flux-torrent" }
-flux-update = { path = "crates/flux-update" }
-flux-cli = { path = "crates/flux-cli" }
+kestrel-engine = { path = "crates/kestrel-engine" }
+kestrel-store = { path = "crates/kestrel-store" }
+kestrel-ipc = { path = "crates/kestrel-ipc" }
+kestrel-media = { path = "crates/kestrel-media" }
+kestrel-torrent = { path = "crates/kestrel-torrent" }
+kestrel-update = { path = "crates/kestrel-update" }
+kestrel-cli = { path = "crates/kestrel-cli" }
 labserver = { path = "tools/labserver" }
 
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "fs", "io-util", "net", "signal"] }

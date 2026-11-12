@@ -1,0 +1,19 @@
+[package]
+name = "kestrel-nmhost"
+description = "Kestrel's native messaging host: the browser extension talks to Kestrel through it"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[[bin]]
+name = "kestrel-nmhost"
+path = "src/main.rs"
+
+[dependencies]
+kestrel-ipc.workspace = true
+kestrel-store.workspace = true
+tokio = { workspace = true, features = ["io-std"] }
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true

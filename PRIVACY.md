@@ -19,4 +19,4 @@ Kestrel uses them for that download only.
 
 Nothing is sent to the developers or to anyone else. There are no analytics, no advertising and no accounts.
 
-Questions: open an issue at https://github.com/AchrafTsouli/flux-downloader/issues
+Questions: open an issue at https://github.com/AchrafTsouli/kestrel-download-manager/issues

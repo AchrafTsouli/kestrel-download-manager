@@ -1,6 +1,6 @@
-//! Flux's side of the browser bridge: answers requests that `flux-nmhost` brings over the per-user pipe.
+//! Kestrel's side of the browser bridge: answers requests that `kestrel-nmhost` brings over the per-user pipe.
 
-use flux_ipc::{CapturePolicy, Request, Response, read_frame, write_frame};
+use kestrel_ipc::{CapturePolicy, Request, Response, read_frame, write_frame};
 use tauri::{AppHandle, Emitter, Manager as _};
 
 use crate::manager::Shared;
@@ -11,7 +11,7 @@ pub fn serve(app: AppHandle) {
     tauri::async_runtime::spawn(async move {
         let mut first = true;
         loop {
-            let mut server = match flux_ipc::pipe::create_server(first) {
+            let mut server = match kestrel_ipc::pipe::create_server(first) {
                 Ok(server) => server,
                 Err(error) => {
                     let _ = app.emit("message", format!("The browser connection could not start: {error}"));
@@ -33,7 +33,7 @@ pub fn serve(app: AppHandle) {
     });
     #[cfg(unix)]
     tauri::async_runtime::spawn(async move {
-        let listener = match flux_ipc::pipe::listen() {
+        let listener = match kestrel_ipc::pipe::listen() {
             Ok(listener) => listener,
             Err(error) => {
                 let _ = app.emit("message", format!("The browser connection could not start: {error}"));
@@ -53,7 +53,7 @@ pub fn serve(app: AppHandle) {
 }
 
 async fn handle(app: &AppHandle, request: Request) -> Response {
-    if let Err(error) = flux_ipc::validate(&request) {
+    if let Err(error) = kestrel_ipc::validate(&request) {
         return Response::error(error);
     }
     let manager = app.state::<Shared>().inner().clone();
@@ -91,7 +91,7 @@ async fn handle(app: &AppHandle, request: Request) -> Response {
         "video-formats" => crate::media::formats(app, &request).await,
         "download" => {
             let url = request.url.clone().unwrap_or_default();
-            if flux_ipc::is_magnet(&url) {
+            if kestrel_ipc::is_magnet(&url) {
                 return crate::torrents::offer_magnet(app, &url).await;
             }
             if request.video.is_some() {

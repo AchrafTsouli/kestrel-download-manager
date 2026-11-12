@@ -1,7 +1,7 @@
 {
   "bundle": {
     "targets": ["deb", "appimage"],
-    "externalBin": ["binaries/flux-nmhost", "binaries/flux-cli"],
+    "externalBin": ["binaries/kestrel-nmhost", "binaries/kestrel-cli"],
     "category": "Utility",
     "shortDescription": "Download manager: files, videos and torrents",
     "linux": {

@@ -3,7 +3,7 @@
 Free code signing provided by [SignPath.io](https://about.signpath.io), certificate by
 [SignPath Foundation](https://signpath.org).
 
-Kestrel Download Manager's Windows programs (`Kestrel.exe`, `flux-nmhost.exe`, `flux-cli.exe`) and
+Kestrel Download Manager's Windows programs (`Kestrel.exe`, `kestrel-nmhost.exe`, `kestrel-cli.exe`) and
 its installer (`Kestrel-Setup-<version>-win-x64.exe`) are signed this way. They are built on GitHub's
 servers from the public source code in this repository by
 [`.github/workflows/release-signed.yml`](../.github/workflows/release-signed.yml); no file built on a

@@ -1,4 +1,4 @@
-/* Flux "Glacier" palette (same values as Flux 1.x's GlacierPalette.cs). Dark by default; the View menu
+/* Kestrel "Glacier" palette (same values as Flux 1.x's GlacierPalette.cs). Dark by default; the View menu
    sets data-theme on <html> to force dark or light. */
 :root, :root[data-theme="dark"] {
   --bg: #0e141b;

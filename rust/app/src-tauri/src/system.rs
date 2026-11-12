@@ -46,7 +46,7 @@ fn home() -> std::path::PathBuf {
 #[cfg(windows)]
 const RUN_VALUE: &str = "ApexDownloader";
 
-/// Starts Flux in the tray when the user signs in (Windows Run key of the current user).
+/// Starts Kestrel in the tray when the user signs in (Windows Run key of the current user).
 pub fn set_autostart(enabled: bool) {
     #[cfg(windows)]
     {
@@ -62,13 +62,13 @@ pub fn set_autostart(enabled: bool) {
     }
     #[cfg(target_os = "macos")]
     {
-        let plist = home().join("Library/LaunchAgents/com.achraftsouli.flux.plist");
+        let plist = home().join("Library/LaunchAgents/com.achraftsouli.kestrel.plist");
         if enabled {
             let exe = std::env::current_exe().map(|p| p.display().to_string()).unwrap_or_default();
             let text = format!(r#"<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
-<key>Label</key><string>com.achraftsouli.flux</string>
+<key>Label</key><string>com.achraftsouli.kestrel</string>
 <key>ProgramArguments</key><array><string>{exe}</string><string>--background</string></array>
 <key>RunAtLoad</key><true/>
 </dict></plist>
@@ -81,7 +81,7 @@ pub fn set_autostart(enabled: bool) {
     #[cfg(all(unix, not(target_os = "macos")))]
     {
         let config = std::env::var_os("XDG_CONFIG_HOME").map(std::path::PathBuf::from).unwrap_or_else(|| home().join(".config"));
-        let entry = config.join("autostart/flux.desktop");
+        let entry = config.join("autostart/kestrel.desktop");
         if enabled {
             let exe = std::env::var_os("APPIMAGE").map(std::path::PathBuf::from).or_else(|| std::env::current_exe().ok()).map(|p| p.display().to_string()).unwrap_or_default();
             let text = format!("[Desktop Entry]\nType=Application\nName=Kestrel\nExec=\"{exe}\" --background\nX-GNOME-Autostart-enabled=true\n");
@@ -92,8 +92,8 @@ pub fn set_autostart(enabled: bool) {
     }
 }
 
-/// Keeps the browser extension connected: when a browser has no Flux bridge registered, or the
-/// registration points to a file that is gone (an uninstalled Flux 1.x), this Flux's bridge is
+/// Keeps the browser extension connected: when a browser has no Kestrel bridge registered, or the
+/// registration points to a file that is gone (an uninstalled Flux 1.x), this Kestrel's bridge is
 /// registered. A working registration of another copy is left alone.
 pub fn ensure_browser_bridge() {
     #[cfg(windows)]
@@ -111,14 +111,14 @@ pub fn ensure_browser_bridge() {
             return;
         }
         let Ok(exe) = std::env::current_exe() else { return };
-        let host = exe.with_file_name("flux-nmhost.exe");
+        let host = exe.with_file_name("kestrel-nmhost.exe");
         if host.is_file() {
             let _ = Command::new(host).arg("--register").creation_flags(0x0800_0000).status();
         }
     }
 }
 
-/// Holds the mutex the installer checks (`AppMutex`), so it asks to close a running Flux instead
+/// Holds the mutex the installer checks (`AppMutex`), so it asks to close a running Kestrel instead
 /// of replacing files in use. Same name as Flux 1.x.
 pub fn hold_running_mutex() {
     #[cfg(windows)]

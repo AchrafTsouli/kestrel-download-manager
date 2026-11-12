@@ -102,7 +102,7 @@ fn entries(directory: &[u8], count: u64) -> Result<Vec<Entry>, String> {
     Ok(list)
 }
 
-pub async fn list(url: &str, session: Option<&flux_engine::Session>) -> Result<Vec<Entry>, String> {
+pub async fn list(url: &str, session: Option<&kestrel_engine::Session>) -> Result<Vec<Entry>, String> {
     let url = Url::parse(url).map_err(|e| e.to_string())?;
     let mut headers = HeaderMap::new();
     if let Some(session) = session {

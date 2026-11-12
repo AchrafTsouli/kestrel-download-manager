@@ -1,8 +1,8 @@
-//! What Flux remembers: downloads, settings and queues. Saved by flux-store; sent to the windows as views.
+//! What Kestrel remembers: downloads, settings and queues. Saved by kestrel-store; sent to the windows as views.
 
 use std::path::{Path, PathBuf};
 
-use flux_engine::{Resume, Session};
+use kestrel_engine::{Resume, Session};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -33,9 +33,9 @@ pub enum Kind {
     #[default]
     Http,
     /// A video page fetched with yt-dlp; the selection is the quality (and clip) chosen.
-    Video { selection: flux_media::Selection },
+    Video { selection: kestrel_media::Selection },
     /// A torrent through aria2; the selection names its saved file list and the chosen files.
-    Torrent { selection: flux_torrent::Selection },
+    Torrent { selection: kestrel_torrent::Selection },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -251,7 +251,7 @@ pub struct Settings {
     pub proxy: String,
     pub proxy_username: String,
     pub proxy_password: String,
-    /// Browser identity sent to sites; empty = Flux's built-in one.
+    /// Browser identity sent to sites; empty = Kestrel's built-in one.
     pub user_agent: String,
     pub queues: Vec<Queue>,
     pub host_limits: std::collections::HashMap<String, usize>,

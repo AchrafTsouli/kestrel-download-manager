@@ -1,6 +1,6 @@
-//! Flux's own updates, through the signed feed (flux-update): a check once a day when enabled, or
+//! Kestrel's own updates, through the signed feed (kestrel-update): a check once a day when enabled, or
 //! from Help > Check for updates; installing pauses everything, saves, and lets the installer run
-//! once Flux has closed (it starts the new Flux when done).
+//! once Kestrel has closed (it starts the new Kestrel when done).
 
 use std::time::Duration;
 
@@ -27,34 +27,34 @@ fn current(app: &AppHandle) -> String {
 pub async fn check(app: &AppHandle) -> Result<UpdateInfo, String> {
     let manager = app.state::<Shared>().inner().clone();
     let feed = manager.settings.read().unwrap().update_feed.clone();
-    let release = flux_update::check(&feed).await?;
+    let release = kestrel_update::check(&feed).await?;
     let mut settings = manager.settings();
     settings.last_update_check_ms = now_ms();
     let _ = manager.save_settings(settings);
     let current = current(app);
-    Ok(UpdateInfo { available: flux_update::is_newer(&release.version, &current), current, version: release.version, signed: release.signed, url: release.url })
+    Ok(UpdateInfo { available: kestrel_update::is_newer(&release.version, &current), current, version: release.version, signed: release.signed, url: release.url })
 }
 
-/// Downloads the newer signed installer (checked against its signed checksum), then closes Flux
+/// Downloads the newer signed installer (checked against its signed checksum), then closes Kestrel
 /// and runs it silently.
 pub async fn install(app: &AppHandle) -> Result<(), String> {
     let manager = app.state::<Shared>().inner().clone();
     let feed = manager.settings.read().unwrap().update_feed.clone();
-    let release = flux_update::check(&feed).await?;
-    if !flux_update::is_newer(&release.version, &current(app)) {
+    let release = kestrel_update::check(&feed).await?;
+    if !kestrel_update::is_newer(&release.version, &current(app)) {
         return Err(format!("Kestrel {} is up to date.", current(app)));
     }
     // The signed installer is for Windows; elsewhere the release page offers the packages.
     #[cfg(not(windows))]
     {
-        let _ = crate::system::open_path(std::path::Path::new("https://github.com/AchrafTsouli/flux-downloader/releases/latest"));
+        let _ = crate::system::open_path(std::path::Path::new("https://github.com/AchrafTsouli/kestrel-download-manager/releases/latest"));
         return Ok(());
     }
     #[cfg_attr(not(windows), allow(unreachable_code))]
     let _ = app.emit("message", format!("Downloading Kestrel {}…", release.version));
-    let installer = flux_update::download_installer(&release).await?;
+    let installer = kestrel_update::download_installer(&release).await?;
     manager.shutdown();
-    // The installer waits for Flux to close (it holds the app's mutex), so start it a moment later.
+    // The installer waits for Kestrel to close (it holds the app's mutex), so start it a moment later.
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -65,7 +65,7 @@ pub async fn install(app: &AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-/// Once a day when enabled in Options: tell the main window a newer Flux exists.
+/// Once a day when enabled in Options: tell the main window a newer Kestrel exists.
 pub fn check_daily(app: AppHandle) {
     tauri::async_runtime::spawn(async move {
         tokio::time::sleep(Duration::from_secs(30)).await;
