@@ -17,6 +17,8 @@ const ATTRIBUTES = ["title", "placeholder", "aria-label"];
 
 let exact = new Map<string, string>();
 let patterns: [RegExp, string][] = [];
+// What the patterns gave for each text seen (null: none matched), for the current language.
+const matched = new Map<string, string | null>();
 let current = "en";
 // What each text node or attribute said in English, and what it was last turned into.
 const texts = new WeakMap<Node, { english: string; shown: string }>();
@@ -45,9 +47,16 @@ export function t(text: string): string {
   if (!inner) return text;
   let found = exact.get(inner);
   if (found === undefined) {
-    for (const [regex, template] of patterns) {
-      const m = regex.exec(inner);
-      if (m) { let i = 1; found = template.replace(/\{\}/g, () => m[i++] ?? ""); break; }
+    // Changing values (speeds, times left) come back several times a second: each is matched once.
+    const known = matched.get(inner);
+    if (known !== undefined) found = known ?? undefined;
+    else {
+      for (const [regex, template] of patterns) {
+        const m = regex.exec(inner);
+        if (m) { let i = 1; found = template.replace(/\{\}/g, () => m[i++] ?? ""); break; }
+      }
+      if (matched.size > 5000) matched.clear();
+      matched.set(inner, found ?? null);
     }
   }
   if (found === undefined) return text;
@@ -106,6 +115,7 @@ export function setLanguage(code: string) {
   const catalog = catalogs[next] ?? {};
   exact = new Map();
   patterns = [];
+  matched.clear();
   for (const [english, translated] of Object.entries(catalog)) {
     if (!translated) continue;
     if (english.includes("{}")) {

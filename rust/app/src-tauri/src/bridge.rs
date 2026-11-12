@@ -84,7 +84,7 @@ async fn handle(app: &AppHandle, request: Request) -> Response {
             Response { ok: true, policy: Some(CapturePolicy { enabled: s.capture_enabled, context_menu: true, extensions: s.capture_extensions, excluded_sites: s.excluded_sites, excluded_addresses: s.excluded_addresses, bypass_key: s.bypass_key, force_key: s.force_key, media_panel: s.video_panel }), ..Default::default() }
         }
         "pause" | "resume" => {
-            let ids: Vec<String> = manager.views().into_iter().filter(|v| request.url.as_deref() == Some(v.url.as_str())).map(|v| v.id).collect();
+            let ids: Vec<String> = request.url.as_deref().map(|url| manager.ids_with_url(url)).unwrap_or_default();
             if request.action == "pause" { manager.pause(&ids) } else { manager.resume(&ids) }
             Response::ok()
         }

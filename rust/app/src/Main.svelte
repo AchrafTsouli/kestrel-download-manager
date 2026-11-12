@@ -7,7 +7,7 @@
   import FileIcon from "./lib/FileIcon.svelte";
   import { call, categories, running, resumable, size, percent, timeLeft, stamp, statusText, statusClass, applyTheme, type Download, type Settings, type AfterQueue } from "./lib/api";
 
-  let downloads: Download[] = $state([]);
+  let downloads: Download[] = $state.raw([]);
   let settings: Settings | null = $state(null);
   let runningQueues: string[] = $state([]);
   let selected: Set<string> = $state(new Set());
@@ -87,7 +87,22 @@
     return visible.filter((d) => active.every((c) => c.text(d).toLowerCase().includes(filters[c.key].trim().toLowerCase())));
   });
   let gridHeight = $state(0);
-  const fillerRows = $derived(Math.max(0, Math.ceil((gridHeight - 25) / 22) - shown.length));
+  const ROW = 22;
+  const fillerRows = $derived(Math.max(0, Math.ceil((gridHeight - 25) / ROW) - shown.length));
+  // Only the rows in sight (and a few around) are drawn: a list of thousands scrolls like a short one.
+  let gridWrap: HTMLDivElement | undefined = $state();
+  let scrollTop = $state(0);
+  const firstRow = $derived(Math.max(0, Math.floor(scrollTop / ROW) - 10));
+  const lastRow = $derived(Math.min(shown.length, Math.ceil((scrollTop + gridHeight) / ROW) + 10));
+  const rows = $derived(shown.slice(firstRow, lastRow));
+  /** Scrolls the list so this download's row is in sight. */
+  function reveal(id: string) {
+    const i = shown.findIndex((d) => d.id === id);
+    if (i < 0 || !gridWrap) return;
+    const top = i * ROW, bottom = top + ROW + 25;
+    if (top < gridWrap.scrollTop) gridWrap.scrollTop = top;
+    else if (bottom > gridWrap.scrollTop + gridWrap.clientHeight) gridWrap.scrollTop = bottom - gridWrap.clientHeight;
+  }
   const recentAddresses = $derived([...new Set([...downloads].sort((a, b) => b.addedMs - a.addedMs).map((d) => d.url))].slice(0, 20));
   function inView(d: Download, key: string) {
     if (key === "all") return true;
@@ -105,8 +120,27 @@
   const active = $derived(downloads.filter((d) => running(d.status)));
   const totalSpeed = $derived(downloads.reduce((s, d) => s + d.bytesPerSecond, 0));
   const viewTitle = $derived(view === "all" ? "All Downloads" : view === "unfinished" ? "Unfinished" : view === "finished" ? "Finished" : view === "failed" ? "Failed" : view.replace(/^(type|queue):/, ""));
-  const count = (key: string) => downloads.filter((d) => inView(d, key)).length;
+  // Every count of the folder tree in one pass over the list (the same rules as inView).
+  const counts = $derived.by(() => {
+    const c = new Map<string, number>();
+    const add = (key: string) => c.set(key, (c.get(key) ?? 0) + 1);
+    for (const d of downloads) {
+      add("all"); add("type:" + d.category);
+      if (d.status === "Completed") add("finished"); else { add("unfinished"); add("queue:" + d.queue); }
+      if (d.status === "Failed") add("failed");
+    }
+    return c;
+  });
+  const count = (key: string) => counts.get(key) ?? 0;
   const currentQueue = $derived(view.startsWith("queue:") ? view.slice(6) : "Main download queue");
+
+  // Puts changed downloads in place (new ones at the end), in one update of the list.
+  function merge(changed: Download[]) {
+    const next = downloads.slice();
+    const at = new Map(next.map((d, i) => [d.id, i]));
+    for (const d of changed) { const i = at.get(d.id); if (i === undefined) { at.set(d.id, next.length); next.push(d); } else next[i] = d; }
+    downloads = next;
+  }
 
   onMount(() => {
     call<Download[]>("list_downloads").then((list) => (downloads = list));
@@ -115,10 +149,9 @@
     call<string>("app_version").then((v) => (version = v));
     call<{ id: string; text: string }[]>("crash_reports").then((list) => (crash = list[0] ?? null));
     const subscriptions = [
-      listen<Download>("download", ({ payload }) => {
-        const i = downloads.findIndex((d) => d.id === payload.id);
-        if (i < 0) downloads.push(payload); else downloads[i] = payload;
-      }),
+      listen<Download>("download", ({ payload }) => merge([payload])),
+      // Progress of everything running, together, 4 times a second.
+      listen<Download[]>("downloads", ({ payload }) => merge(payload)),
       listen<string[]>("removed", ({ payload }) => {
         downloads = downloads.filter((d) => !payload.includes(d.id));
         selected = new Set([...selected].filter((id) => !payload.includes(id)));
@@ -277,7 +310,7 @@
     const at = visible.findIndex((d) => selected.has(d.id));
     const next = visible[(at + 1) % visible.length];
     selected = new Set([next.id]); anchor = next.id;
-    requestAnimationFrame(() => document.querySelector("tr.sel")?.scrollIntoView({ block: "nearest" }));
+    reveal(next.id);
   }
   // Speed limiter: on/off keeps the last limit chosen in Options.
   function limiter(on: boolean) {
@@ -453,7 +486,7 @@
         <h1>{viewTitle}</h1>
         <input class="search" type="search" placeholder="Search downloads…" bind:value={search} aria-label="Search downloads" />
       </div>
-      <div class="grid-wrap" bind:clientHeight={gridHeight}>
+      <div class="grid-wrap" bind:clientHeight={gridHeight} bind:this={gridWrap} onscroll={(e) => (scrollTop = e.currentTarget.scrollTop)}>
         <table class="grid" style:min-width="{tableWidth}px">
           <colgroup>{#each columns as c}<col style:width={widthOf(c) ? widthOf(c) + "px" : null} />{/each}</colgroup>
           <thead>
@@ -481,8 +514,9 @@
             </tr>
           </thead>
           <tbody>
-            {#each shown as d (d.id)}
-              <tr class:sel={selected.has(d.id)} onmousedown={(e) => rowDown(d, e)} onmousemove={rowMove} onmouseup={() => (dragFrom = null)} ondblclick={() => activate(d)} oncontextmenu={(e) => rowMenu(d, e)} title={d.error ?? d.url}>
+            {#if firstRow > 0}<tr class="spacer" aria-hidden="true"><td colspan={columns.length} style:height="{firstRow * ROW}px"></td></tr>{/if}
+            {#each rows as d, i (d.id)}
+              <tr class:sel={selected.has(d.id)} class:alt={(firstRow + i) % 2 === 1} onmousedown={(e) => rowDown(d, e)} onmousemove={rowMove} onmouseup={() => (dragFrom = null)} ondblclick={() => activate(d)} oncontextmenu={(e) => rowMenu(d, e)} title={d.error ?? d.url}>
                 <td class="name"><FileIcon {d} /><span>{d.name}</span></td>
                 <td class="c">{d.status === "Queued" ? "⏱" : ""}</td>
                 <td class="r">{size(d.total)}</td>
@@ -494,9 +528,10 @@
                 <td class="desc">{d.description}</td>
               </tr>
             {/each}
+            {#if lastRow < shown.length}<tr class="spacer" aria-hidden="true"><td colspan={columns.length} style:height="{(shown.length - lastRow) * ROW}px"></td></tr>{/if}
             <!-- Like IDM: the empty grid continues below the downloads. -->
-            {#each { length: fillerRows } as _}
-              <tr class="filler" aria-hidden="true">{#each columns as _c}<td></td>{/each}</tr>
+            {#each { length: fillerRows } as _, j}
+              <tr class="filler" class:alt={(shown.length + j) % 2 === 1} aria-hidden="true">{#each columns as _c}<td></td>{/each}</tr>
             {/each}
           </tbody>
         </table>
@@ -509,7 +544,7 @@
 
   <footer class="statusbar">
     <span class="msg">{message}</span>
-    <span class="totals">Total: <b>{downloads.length}</b>&nbsp;&nbsp; Active: <b>{active.length}</b>{totalSpeed > 0 ? ` · ${size(totalSpeed)}/s` : ""}&nbsp;&nbsp; Finished: <b>{downloads.filter((d) => d.status === "Completed").length}</b></span>
+    <span class="totals">Total: <b>{downloads.length}</b>&nbsp;&nbsp; Active: <b>{active.length}</b>{totalSpeed > 0 ? ` · ${size(totalSpeed)}/s` : ""}&nbsp;&nbsp; Finished: <b>{count("finished")}</b></span>
   </footer>
 </div>
 
@@ -728,7 +763,9 @@
   .grid td { height: 21px; padding: 0 6px; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .grid tr.filler td { height: 21px; }
   .grid tbody tr.filler:hover { background: transparent; }
-  .grid tbody tr:nth-child(even) { background: var(--row-alt); }
+  .grid tbody tr.alt { background: var(--row-alt); }
+  .grid tbody tr.spacer td { padding: 0; border: 0; }
+  .grid tbody tr.spacer:hover { background: transparent; }
   .grid tbody tr:hover { background: color-mix(in srgb, var(--selection) 45%, transparent); }
   .grid tbody tr.sel { background: var(--selection); color: var(--selection-text); }
   .grid .r { text-align: right; }

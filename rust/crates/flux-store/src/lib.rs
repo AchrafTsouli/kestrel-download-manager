@@ -64,7 +64,7 @@ impl Store {
         }
         let connection = Connection::open(path)?;
         connection.execute_batch(
-            "PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;
+            "PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;
              CREATE TABLE IF NOT EXISTS downloads (id TEXT PRIMARY KEY, position INTEGER NOT NULL, data BLOB NOT NULL);
              CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, data BLOB NOT NULL);",
         )?;
@@ -91,13 +91,28 @@ impl Store {
         transaction.commit()?;
         Ok(())
     }
-    /// Saves one record (progress checkpoints) without rewriting the others.
+    /// Saves one record without rewriting the others (a new one goes at the end of the list).
     pub fn save_download<T: Serialize>(&self, id: &str, value: &T) -> Result<()> {
-        let position: i64 = self.connection.query_row("SELECT COALESCE(MAX(position), -1) + 1 FROM downloads", [], |r| r.get(0))?;
-        self.connection.execute(
-            "INSERT INTO downloads (id, position, data) VALUES (?1, ?2, ?3) ON CONFLICT(id) DO UPDATE SET data = excluded.data",
-            params![id, position, Store::seal(value)?],
-        )?;
+        Store::upsert(&self.connection, id, &Store::seal(value)?)
+    }
+    /// Saves several records in one transaction (the progress of every running download at once).
+    pub fn save_many<T: Serialize>(&mut self, downloads: &[(String, T)]) -> Result<()> {
+        // Sealed before the transaction opens, so it lasts only as long as the writes.
+        let sealed: Vec<(&String, Vec<u8>)> = downloads.iter().map(|(id, value)| Ok((id, Store::seal(value)?))).collect::<Result<_>>()?;
+        let transaction = self.connection.transaction()?;
+        for (id, data) in &sealed {
+            Store::upsert(&transaction, id, data)?;
+        }
+        transaction.commit()?;
+        Ok(())
+    }
+    fn upsert(connection: &Connection, id: &str, data: &[u8]) -> Result<()> {
+        // An existing record is updated in place; only a new one needs its place at the end.
+        if connection.prepare_cached("UPDATE downloads SET data = ?2 WHERE id = ?1")?.execute(params![id, data])? == 0 {
+            connection
+                .prepare_cached("INSERT INTO downloads (id, position, data) VALUES (?1, (SELECT COALESCE(MAX(position), -1) + 1 FROM downloads), ?2)")?
+                .execute(params![id, data])?;
+        }
         Ok(())
     }
     pub fn remove_download(&self, id: &str) -> Result<()> {
@@ -199,6 +214,13 @@ mod tests {
         assert_eq!(loaded[0].1.resume.total, Some(99));
         assert_eq!(store.get::<serde_json::Value>("settings").unwrap().unwrap()["proxyPassword"], "secret-123");
         assert_eq!(base64("aGVsbG8=").unwrap(), b"hello");
+        // Several at once: existing ones keep their place, a new one goes last.
+        let mut store = store;
+        let record = |total| Record { url: "https://c.test/z".into(), resume: flux_engine::Resume { total: Some(total), ..Default::default() } };
+        store.save_many(&[("3".into(), record(3)), ("1".into(), record(7))]).unwrap();
+        let loaded: Vec<(String, Record)> = store.load_downloads().unwrap();
+        assert_eq!(loaded.iter().map(|(id, _)| id.as_str()).collect::<Vec<_>>(), ["1", "2", "3"]);
+        assert_eq!(loaded[0].1.resume.total, Some(7));
         drop(store);
         let _ = std::fs::remove_file(&path);
     }

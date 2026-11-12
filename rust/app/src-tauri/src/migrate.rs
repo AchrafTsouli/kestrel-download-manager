@@ -196,7 +196,7 @@ pub fn join_parts(job: &Value, record: &Record) -> std::io::Result<Option<Resume
         let file = v1_part(job, &record.destination, &record.id, index);
         let on_disk = std::fs::metadata(&file).map(|m| m.len()).unwrap_or(0);
         let done = number(segment, "CommittedBytes").unwrap_or(on_disk).min(on_disk);
-        plan.segments.push(flux_engine::plan::Segment { start, end, done, active: false });
+        plan.segments.push(flux_engine::plan::Segment { start, end, done, active: false, speed: 0 });
         parts.push((file, start, done));
     }
     if parts.iter().all(|(_, _, done)| *done == 0) {
@@ -406,6 +406,28 @@ mod seed {
         }
         if let Ok(language) = std::env::var("FLUX_TEST_LANGUAGE") {
             settings.language = language;
+        }
+        // FLUX_TEST_HISTORY=N: a long history of finished downloads (list and CPU checks).
+        if let Some(count) = std::env::var("FLUX_TEST_HISTORY").ok().and_then(|n| n.parse::<usize>().ok()) {
+            let folder = settings.download_dir.clone();
+            let list: Vec<(String, crate::model::Record)> = (0..count)
+                .map(|i| {
+                    let name = format!("file-{i:05}.{}", ["zip", "exe", "mp4", "pdf", "iso"][i % 5]);
+                    let record: crate::model::Record = serde_json::from_value(serde_json::json!({
+                        "id": format!("h{i:05}"), "url": format!("https://example.org/files/{name}"),
+                        "destination": folder.join(&name), "category": crate::model::category_for(&name),
+                        "description": "", "status": "Completed", "addedMs": 1_760_000_000_000u64 + i as u64 * 60_000,
+                        "completedMs": 1_760_000_000_000u64 + i as u64 * 60_000, "total": 1_000_000 + i as u64, "written": 1_000_000 + i as u64,
+                    }))
+                    .unwrap();
+                    (record.id.clone(), record)
+                })
+                .collect();
+            let mut store = store;
+            store.save_downloads(&list).unwrap();
+            store.set("settings", &settings).unwrap();
+            store.set("imported-v1", &true).unwrap();
+            return;
         }
         store.set("settings", &settings).unwrap();
         store.set("imported-v1", &true).unwrap();

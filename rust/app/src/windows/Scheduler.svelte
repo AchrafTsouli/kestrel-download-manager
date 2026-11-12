@@ -29,6 +29,7 @@
     const subs = [
       listen<string[]>("queues", ({ payload }) => (runningQueues = payload)),
       listen<Download>("download", ({ payload }) => { const i = downloads.findIndex((d) => d.id === payload.id); if (i < 0) downloads.push(payload); else downloads[i] = payload; }),
+      listen<Download[]>("downloads", ({ payload }) => { for (const p of payload) { const i = downloads.findIndex((d) => d.id === p.id); if (i < 0) downloads.push(p); else downloads[i] = p; } }),
       listen<string[]>("removed", ({ payload }) => (downloads = downloads.filter((d) => !payload.includes(d.id)))),
     ];
     return () => subs.forEach((x) => x.then((f) => f()));

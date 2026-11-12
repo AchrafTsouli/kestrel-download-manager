@@ -272,3 +272,19 @@ async fn the_grabber_follows_one_site_and_lists_the_wanted_files() {
     assert_eq!(files, [format!("{root}files/a.zip"), format!("{root}files/b.PDF?v=2&k=1")]);
     assert!(engine().grab(&Url::parse(&root).unwrap(), " ", None).await.is_err(), "no types, nothing to look for");
 }
+
+/// One connection crawls (80 KB/s) while the others are fast: the free connections take over what
+/// it has left, instead of everyone waiting for it ("stuck at 99 %"). Alone it would need about 13 s.
+#[tokio::test]
+async fn idle_connections_finish_a_slow_part() {
+    let server = LabServer::start().await.unwrap();
+    let engine = engine();
+    let size = 16_000_000u64;
+    let mut job = job(&server, "endgame.bin", &format!("size={size}&seed=5&lag_from={}", size - size / 4), 4);
+    let started = std::time::Instant::now();
+    let outcome = run(&engine, &mut job).await.unwrap();
+    let took = started.elapsed();
+    assert!(matches!(outcome, Outcome::Completed { bytes, .. } if bytes == size));
+    assert_eq!(std::fs::read(&job.destination).unwrap(), expected(size, 5));
+    assert!(took < Duration::from_secs(8), "the slow part held the download for {took:?}");
+}

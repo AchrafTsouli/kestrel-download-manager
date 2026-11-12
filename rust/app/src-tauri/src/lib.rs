@@ -859,7 +859,7 @@ fn clipboard_monitor(app: AppHandle) {
             let Ok(url) = url::Url::parse(&text) else { continue };
             let ext = std::path::Path::new(url.path()).extension().map(|e| e.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
             let wanted = !ext.is_empty() && settings.capture_extensions.split_whitespace().any(|e| e.trim_start_matches('.').eq_ignore_ascii_case(&ext));
-            if matches!(url.scheme(), "http" | "https") && wanted && !manager.views().iter().any(|v| v.url == text) {
+            if matches!(url.scheme(), "http" | "https") && wanted && !manager.has_url(&text) {
                 let _ = offer(&app, PendingRequest { url: text, ..Default::default() }, true);
             }
         }
@@ -880,7 +880,7 @@ fn tray_look(manager: &Shared) -> TrayLook {
         language: i18n::resolve(&settings.language).to_string(),
         limiter: settings.speed_limit > 0,
         main_running: manager.running_queues.lock().unwrap().iter().any(|q| q == crate::model::MAIN_QUEUE),
-        running: manager.views().into_iter().filter(|v| v.status.running()).map(|v| (v.id, v.name)).collect(),
+        running: manager.views_where(|r| r.status.running()).into_iter().map(|v| (v.id, v.name)).collect(),
     }
 }
 /// A download's name as the menu shows it: short, and "&" doubled (menus read it as a shortcut mark).

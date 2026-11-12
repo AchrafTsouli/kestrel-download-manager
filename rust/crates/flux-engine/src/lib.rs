@@ -46,6 +46,13 @@ fn is_bot_challenge(response: &reqwest::Response) -> bool {
 
 pub const DEFAULT_USER_AGENT: &str ="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 
+/// Bytes a connection gathers before writing them.
+const WRITE_BUFFER: usize = 1 << 20;
+/// At the end, a part is shared with an idle connection when it still needs this long at its own speed...
+const ENDGAME_SECONDS: u64 = 3;
+/// ...and at least twice this much is left.
+const ENDGAME_SPLIT: u64 = 64 << 10;
+
 #[derive(Debug, Clone)]
 pub struct Options {
     pub max_connections: usize,
@@ -469,9 +476,11 @@ impl Engine {
         let stop = cancel.child_token();
         let shared_job = Arc::new(job.clone());
         let mut tasks = tokio::task::JoinSet::new();
+        // Rings when a part ends, so connections waiting to help look again at once.
+        let wake = Arc::new(tokio::sync::Notify::new());
         for _ in 0..workers {
-            let (engine, plan, part, job, running, written, stop) = (self.clone(), plan.clone(), part.clone(), shared_job.clone(), running.clone(), written.clone(), stop.clone());
-            tasks.spawn(async move { engine.worker(&job, &plan, &part, &running, &written, &stop).await });
+            let (engine, plan, part, job, running, written, stop, wake) = (self.clone(), plan.clone(), part.clone(), shared_job.clone(), running.clone(), written.clone(), stop.clone(), wake.clone());
+            tasks.spawn(async move { engine.worker(&job, &plan, &part, &running, &written, &stop, &wake).await });
         }
         // Progress and checkpoints while the workers run.
         let ticker = {
@@ -527,7 +536,8 @@ impl Engine {
         }
     }
 
-    async fn worker(&self, job: &Job, plan: &Mutex<Plan>, part: &file::PartFile, running: &AtomicUsize, written: &AtomicU64, stop: &CancellationToken) -> Result<()> {
+    #[allow(clippy::too_many_arguments)]
+    async fn worker(&self, job: &Job, plan: &Mutex<Plan>, part: &file::PartFile, running: &AtomicUsize, written: &AtomicU64, stop: &CancellationToken, wake: &tokio::sync::Notify) -> Result<()> {
         let max_segments = if self.host_limits.limit_for(&job.url).is_some() { job.connections.max(1) } else { self.options.max_segments };
         // Connections cut in a row on this worker without its part moving on.
         let mut cuts = 0u32;
@@ -535,11 +545,44 @@ impl Engine {
             if stop.is_cancelled() {
                 return Ok(());
             }
-            let Some(claim) = plan.lock().unwrap().claim(self.options.min_split, max_segments) else { return Ok(()) };
+            let claim = plan.lock().unwrap().claim(self.options.min_split, max_segments);
+            let Some(claim) = claim else {
+                // Nothing to take now. While another part is still coming, stay: when it turns out
+                // slow, this connection takes over half of what it has left (no "stuck at 99 %").
+                // Listening before looking: a part that ends in between still wakes this one.
+                let notified = wake.notified();
+                tokio::pin!(notified);
+                notified.as_mut().enable();
+                if !plan.lock().unwrap().segments.iter().any(|s| s.active && !s.finished()) {
+                    return Ok(());
+                }
+                tokio::select! {
+                    _ = tokio::time::sleep(Duration::from_millis(500)) => {}
+                    _ = &mut notified => continue,
+                    _ = stop.cancelled() => return Ok(()),
+                }
+                let help = plan.lock().unwrap().help_slowest(ENDGAME_SPLIT, ENDGAME_SECONDS, max_segments);
+                let Some(claim) = help else { continue };
+                let result = self.transfer(job, plan, claim.index, part, written, stop).await;
+                plan.lock().unwrap().release(claim.index);
+                wake.notify_waiters();
+                match result {
+                    Ok(()) => {}
+                    // The helper is a bonus: when its connection fails, the part waits for the next free connection.
+                    Err(error) if error.kind == ErrorKind::Network && !stop.is_cancelled() => {}
+                    Err(error) if error.is_refusal() && !stop.is_cancelled() => return Ok(()),
+                    Err(error) => {
+                        running.fetch_sub(1, Ordering::SeqCst);
+                        return Err(error);
+                    }
+                }
+                continue;
+            };
             let before = plan.lock().unwrap().segments[claim.index].position();
             let result = self.transfer(job, plan, claim.index, part, written, stop).await;
             let moved = plan.lock().unwrap().segments[claim.index].position() > before;
             plan.lock().unwrap().release(claim.index);
+            wake.notify_waiters();
             match result {
                 Ok(()) => cuts = 0,
                 // A dropped connection: this part continues at once on a new connection, from where it
@@ -593,17 +636,29 @@ impl Engine {
 
         let mut stream = response.bytes_stream();
         let mut offset = position;
-        let mut buffer: Vec<u8> = Vec::with_capacity(1 << 20);
+        // One buffer for the whole connection: handed to the writer and given back, never reallocated.
+        let mut buffer: Vec<u8> = Vec::with_capacity(WRITE_BUFFER);
         let flush = |buffer: &mut Vec<u8>, at: u64| {
             let data = std::mem::take(buffer);
             let part = part.clone();
             async move {
                 let len = data.len() as u64;
-                tokio::task::spawn_blocking(move || part.write_at(at, &data)).await.map_err(|e| Error::protocol(e.to_string()))?.map_err(Error::storage)?;
-                Ok::<u64, Error>(len)
+                let data = tokio::task::spawn_blocking(move || part.write_at(at, &data).map(|_| data))
+                    .await
+                    .map_err(|e| Error::protocol(e.to_string()))?
+                    .map_err(Error::storage)?;
+                Ok::<(u64, Vec<u8>), Error>((len, data))
             }
         };
         let mut buffer_start = offset;
+        let (started, mut received, mut flushed_at, mut clipped) = (Instant::now(), 0u64, Instant::now(), false);
+        let clip = |buffer: &mut Vec<u8>, at: u64| -> bool {
+            let end = plan.lock().unwrap().segments[index].end;
+            let room = end.map(|end| (end + 1).saturating_sub(at) as usize).unwrap_or(usize::MAX);
+            let clipped = buffer.len() > room;
+            buffer.truncate(room);
+            clipped
+        };
         loop {
             let next = tokio::select! {
                 next = tokio::time::timeout(self.options.read_timeout, stream.next()) => next,
@@ -623,18 +678,34 @@ impl Engine {
             job.limiter.take(take).await;
             buffer.extend_from_slice(&chunk[..take]);
             offset += take as u64;
-            if buffer.len() >= 1 << 20 || take < chunk.len() {
-                let len = flush(&mut buffer, buffer_start).await?;
-                plan.lock().unwrap().segments[index].done += len;
+            received += take as u64;
+            // Full, at the part's end, or a second old: a slow connection still shows (and saves) its progress.
+            if buffer.len() >= WRITE_BUFFER || take < chunk.len() || flushed_at.elapsed() >= Duration::from_secs(1) {
+                // A helper may have taken the rest of this part since these bytes arrived.
+                if clip(&mut buffer, buffer_start) {
+                    offset = buffer_start + buffer.len() as u64;
+                    clipped = true;
+                }
+                let (len, mut data) = flush(&mut buffer, buffer_start).await?;
+                data.clear();
+                buffer = data;
+                {
+                    let mut plan = plan.lock().unwrap();
+                    let segment = &mut plan.segments[index];
+                    segment.done += len;
+                    segment.speed = (received as f64 / started.elapsed().as_secs_f64().max(0.001)) as u64;
+                }
                 written.fetch_add(len, Ordering::Relaxed);
                 buffer_start = offset;
+                flushed_at = Instant::now();
             }
-            if take < chunk.len() || limit.is_some_and(|end| offset > end) {
+            if clipped || take < chunk.len() || limit.is_some_and(|end| offset > end) {
                 break;
             }
         }
+        clip(&mut buffer, buffer_start);
         if !buffer.is_empty() {
-            let len = flush(&mut buffer, buffer_start).await?;
+            let (len, _) = flush(&mut buffer, buffer_start).await?;
             plan.lock().unwrap().segments[index].done += len;
             written.fetch_add(len, Ordering::Relaxed);
         }

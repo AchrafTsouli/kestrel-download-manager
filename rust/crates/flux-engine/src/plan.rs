@@ -14,6 +14,9 @@ pub struct Segment {
     pub done: u64,
     #[serde(skip)]
     pub active: bool,
+    /// Bytes per second of the connection on it (0 until measured).
+    #[serde(skip)]
+    pub speed: u64,
 }
 
 impl Segment {
@@ -50,15 +53,15 @@ impl Plan {
     /// `connections` equal parts of a file of `total` bytes (one part when ranges are not allowed or the size is unknown).
     pub fn new(total: Option<u64>, ranged: bool, connections: usize, min_part: u64) -> Plan {
         let Some(total) = total.filter(|_| ranged) else {
-            return Plan { segments: vec![Segment { start: 0, end: total.map(|t| t.saturating_sub(1)).filter(|_| total.is_some_and(|t| t > 0)), done: 0, active: false }], splits: 0 };
+            return Plan { segments: vec![Segment { start: 0, end: total.map(|t| t.saturating_sub(1)).filter(|_| total.is_some_and(|t| t > 0)), done: 0, active: false, speed: 0 }], splits: 0 };
         };
         if total == 0 {
-            return Plan { segments: vec![Segment { start: 0, end: None, done: 0, active: false }], splits: 0 };
+            return Plan { segments: vec![Segment { start: 0, end: None, done: 0, active: false, speed: 0 }], splits: 0 };
         }
         let count = (connections.max(1) as u64).min((total / min_part.max(1)).max(1));
         let chunk = total / count;
         let segments = (0..count)
-            .map(|i| Segment { start: i * chunk, end: Some(if i == count - 1 { total - 1 } else { (i + 1) * chunk - 1 }), done: 0, active: false })
+            .map(|i| Segment { start: i * chunk, end: Some(if i == count - 1 { total - 1 } else { (i + 1) * chunk - 1 }), done: 0, active: false, speed: 0 })
             .collect();
         Plan { segments, splits: 0 }
     }
@@ -105,7 +108,31 @@ impl Plan {
         }
         let old = &mut self.segments[index];
         let middle = old.position() + remaining / 2;
-        let tail = Segment { start: middle, end: old.end, done: 0, active: true };
+        let tail = Segment { start: middle, end: old.end, done: 0, active: true, speed: 0 };
+        old.end = Some(middle - 1);
+        self.segments.push(tail);
+        self.splits += 1;
+        Some(Claim { index: self.segments.len() - 1, split: true })
+    }
+
+    /// The end of a download: an idle connection takes the second half of the part that needs the
+    /// longest at its own speed, when that is more than `seconds` and at least `min_split * 2` is left.
+    pub fn help_slowest(&mut self, min_split: u64, seconds: u64, max_segments: usize) -> Option<Claim> {
+        if self.segments.len() >= max_segments {
+            return None;
+        }
+        let (index, remaining) = self
+            .segments
+            .iter()
+            .enumerate()
+            .filter(|(_, s)| s.active && s.speed > 0)
+            .filter_map(|(i, s)| s.remaining().map(|r| (i, r, r / s.speed)))
+            .filter(|(_, r, wait)| *wait > seconds && *r >= min_split * 2)
+            .max_by_key(|(_, _, wait)| *wait)
+            .map(|(i, r, _)| (i, r))?;
+        let old = &mut self.segments[index];
+        let middle = old.position() + remaining / 2;
+        let tail = Segment { start: middle, end: old.end, done: 0, active: true, speed: 0 };
         old.end = Some(middle - 1);
         self.segments.push(tail);
         self.splits += 1;
@@ -144,6 +171,24 @@ mod tests {
         assert_eq!(plan.segments[2].start, plan.segments[1].start + (25 << 20));
         assert_eq!(plan.segments[1].end, Some(plan.segments[2].start - 1));
         assert!(plan.claim(1, 3).is_none(), "segment cap respected");
+    }
+
+    #[test]
+    fn an_idle_connection_helps_the_slowest_part() {
+        let mut plan = Plan::new(Some(8 << 20), true, 2, 1);
+        plan.claim(1, 64);
+        plan.claim(1, 64);
+        plan.segments[0].done = 4 << 20; // finished
+        plan.segments[0].active = false;
+        plan.segments[1].done = 2 << 20;
+        plan.segments[1].speed = 100 << 10; // 2 MB left at 100 KB/s: about 20 s
+        let mut plan2 = plan.clone();
+        let help = plan2.help_slowest(64 << 10, 3, 64).expect("helps");
+        assert_eq!(plan2.segments[help.index].start, (6 << 20) + (1 << 20));
+        assert_eq!(plan2.segments[1].end, Some((7 << 20) - 1));
+        plan.segments[1].speed = 10 << 20; // fast: done in a moment, nobody needs to help
+        assert!(plan.help_slowest(64 << 10, 3, 64).is_none());
+        assert!(plan2.help_slowest(64 << 10, 3, 3).is_none(), "segment cap respected");
     }
 
     /// Random simulation: workers take turns writing random amounts; the file must end fully covered

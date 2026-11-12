@@ -11,6 +11,7 @@
 //! | `fail=N`       | the first N requests of this path get `503` |
 //! | `drop_at=N`    | the first transfer that passes byte N of the file is cut there (once per path) |
 //! | `slow_us=N`    | waits N microseconds per 16 KiB chunk |
+//! | `lag_from=N`   | the first transfer that starts at byte N or later waits 200 ms per chunk (one slow connection, once per path) |
 //! | `html=1`       | answers with a web page instead of the file |
 //!
 //! [`LabServer::stats`] reports what each path saw, so tests can check how many connections the
@@ -61,6 +62,7 @@ struct PathState {
     refused: AtomicU64,
     max_concurrent: AtomicUsize,
     dropped: std::sync::atomic::AtomicBool,
+    lagged: std::sync::atomic::AtomicBool,
 }
 
 #[derive(Default)]
@@ -212,7 +214,8 @@ async fn handle(shared: Arc<Shared>, request: Request<hyper::body::Incoming>) ->
     let length = if size == 0 { 0 } else { end - start + 1 };
     let drop_at = query.get("drop_at").and_then(|v| v.parse::<u64>().ok());
     let cut = drop_at.filter(|at| *at > start && *at <= end && !state.dropped.swap(true, Ordering::SeqCst));
-    let slow = Duration::from_micros(number("slow_us", 0));
+    let lag = query.get("lag_from").and_then(|v| v.parse::<u64>().ok()).is_some_and(|from| start >= from && !state.lagged.swap(true, Ordering::SeqCst));
+    let slow = if lag { Duration::from_millis(200) } else { Duration::from_micros(number("slow_us", 0)) };
     let send_until = cut.unwrap_or(end + 1);
 
     let mut builder = Response::builder()

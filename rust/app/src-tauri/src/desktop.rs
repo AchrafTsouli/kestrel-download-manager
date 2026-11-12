@@ -18,8 +18,7 @@ pub fn taskbar_progress(app: AppHandle) {
         let mut last: Option<(u8, u64)> = None;
         loop {
             tokio::time::sleep(Duration::from_secs(1)).await;
-            let views = app.state::<Shared>().views();
-            let running: Vec<_> = views.iter().filter(|v| v.status.running()).collect();
+            let running = app.state::<Shared>().views_where(|r| r.status.running());
             let (written, total) = running.iter().filter_map(|v| v.total.map(|t| (v.written.min(t), t))).fold((0u64, 0u64), |(w, t), (a, b)| (w + a, t + b));
             let retrying = running.iter().any(|v| v.status == Status::Retrying);
             let state = if running.is_empty() {

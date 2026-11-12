@@ -77,6 +77,10 @@ pub struct Manager {
     pub running_queues: Mutex<std::collections::HashSet<String>>,
     /// Flux dialled the VPN and it is still up.
     vpn_up: tokio::sync::Mutex<bool>,
+    /// Downloads whose progress changed since the windows were last told (sent together, 4 times a second).
+    changed: Mutex<std::collections::HashSet<String>>,
+    /// Downloads with a checkpoint not saved yet (saved together, every 2 seconds and on exit).
+    dirty: Mutex<std::collections::HashSet<String>>,
 }
 
 pub type Shared = Arc<Manager>;
@@ -120,7 +124,10 @@ impl Manager {
             live: Mutex::new(HashMap::new()),
             running_queues: Mutex::new(std::collections::HashSet::new()),
             vpn_up: tokio::sync::Mutex::new(false),
+            changed: Mutex::new(std::collections::HashSet::new()),
+            dirty: Mutex::new(std::collections::HashSet::new()),
         });
+        Manager::pace(Arc::downgrade(&manager));
         let current = manager.settings.read().unwrap().clone();
         if let Err(error) = manager.apply_network(&current) {
             // Downloads go direct until the setting is corrected in Options.
@@ -136,8 +143,21 @@ impl Manager {
         View::of(record, live.get(&record.id).map(|l| &l.info).unwrap_or(&LiveInfo::default()))
     }
     pub fn views(&self) -> Vec<View> {
-        let records = self.records.lock().unwrap().clone();
-        records.iter().map(|r| self.view_of(r)).collect()
+        self.views_where(|_| true)
+    }
+    /// The views of the downloads that pass `keep`, without copying the others (the list can hold
+    /// thousands, and the tray and the taskbar look every second).
+    pub fn views_where(&self, keep: impl Fn(&Record) -> bool) -> Vec<View> {
+        // The live part is small (running transfers only); copied first, so the two locks are never held together.
+        let live: HashMap<String, LiveInfo> = self.live.lock().unwrap().iter().map(|(id, l)| (id.clone(), l.info.clone())).collect();
+        let none = LiveInfo::default();
+        self.records.lock().unwrap().iter().filter(|r| keep(r)).map(|r| View::of(r, live.get(&r.id).unwrap_or(&none))).collect()
+    }
+    pub fn has_url(&self, url: &str) -> bool {
+        self.records.lock().unwrap().iter().any(|r| r.url == url)
+    }
+    pub fn ids_with_url(&self, url: &str) -> Vec<String> {
+        self.records.lock().unwrap().iter().filter(|r| r.url == url).map(|r| r.id.clone()).collect()
     }
     pub fn view(&self, id: &str) -> Option<View> {
         let record = self.record(id)?;
@@ -152,20 +172,56 @@ impl Manager {
         change(record);
         Some(record.clone())
     }
+    /// [`Manager::update`] without the copy (progress, several times a second).
+    fn modify(&self, id: &str, change: impl FnOnce(&mut Record)) {
+        if let Some(record) = self.records.lock().unwrap().iter_mut().find(|r| r.id == id) {
+            change(record);
+        }
+    }
+    /// Progress for the windows, sent with the others at the next tick.
+    fn changed(&self, id: &str) {
+        self.changed.lock().unwrap().insert(id.to_string());
+    }
+    /// Every 250 ms: one "downloads" event with what changed. Every 2 s: the checkpoints, in one transaction.
+    fn pace(manager: std::sync::Weak<Manager>) {
+        std::thread::spawn(move || {
+            let mut tick = 0u32;
+            loop {
+                std::thread::sleep(Duration::from_millis(250));
+                let Some(manager) = manager.upgrade() else { return };
+                tick = tick.wrapping_add(1);
+                let ids: Vec<String> = std::mem::take(&mut *manager.changed.lock().unwrap()).into_iter().collect();
+                if !ids.is_empty() {
+                    let views = manager.views_where(|r| ids.contains(&r.id));
+                    let _ = manager.app.emit("downloads", views);
+                }
+                if tick % 8 == 0 {
+                    manager.save_dirty();
+                }
+            }
+        });
+    }
+    fn save_dirty(&self) {
+        let ids: Vec<String> = std::mem::take(&mut *self.dirty.lock().unwrap()).into_iter().collect();
+        if ids.is_empty() {
+            return;
+        }
+        let list: Vec<(String, Record)> = self.records.lock().unwrap().iter().filter(|r| ids.contains(&r.id)).map(|r| (r.id.clone(), r.clone())).collect();
+        if let Err(error) = self.store.lock().unwrap().save_many(&list) {
+            let _ = self.app.emit("message", format!("Could not save the download list: {error}"));
+        }
+    }
     fn emit(&self, id: &str) {
         if let Some(view) = self.view(id) {
             let _ = self.app.emit("download", view);
         }
     }
     fn save(&self, id: &str) {
+        self.dirty.lock().unwrap().remove(id);
         if let Some(record) = self.record(id)
             && let Err(error) = self.store.lock().unwrap().save_download(id, &record) {
                 let _ = self.app.emit("message", format!("Could not save the download list: {error}"));
             }
-    }
-    fn save_all(&self) {
-        let list: Vec<(String, Record)> = self.records.lock().unwrap().iter().map(|r| (r.id.clone(), r.clone())).collect();
-        let _ = self.store.lock().unwrap().save_downloads(&list);
     }
     /// Proxy and browser identity for the engine, yt-dlp and aria2.
     fn apply_network(&self, settings: &Settings) -> Result<(), String> {
@@ -493,13 +549,13 @@ impl Manager {
     fn on_event(&self, id: &str, event: Event) {
         match event {
             Event::Probed(info) => {
-                self.update(id, |r| {
+                self.modify(id, |r| {
                     r.total = info.total;
                     r.status = Status::Downloading;
                 });
             }
             Event::Progress { written, total, bytes_per_second, connections } => {
-                self.update(id, |r| {
+                self.modify(id, |r| {
                     r.written = written;
                     r.total = total.or(r.total);
                     if r.status != Status::Finishing { r.status = Status::Downloading; }
@@ -510,11 +566,11 @@ impl Manager {
                 }
             }
             Event::Checkpoint(resume) => {
-                self.update(id, |r| { r.written = resume.written(); r.resume = resume; });
-                self.save(id);
+                self.modify(id, |r| { r.written = resume.written(); r.resume = resume; });
+                self.dirty.lock().unwrap().insert(id.to_string());
             }
             Event::Retrying { delay, error, .. } => {
-                self.update(id, |r| { r.status = Status::Retrying; r.error = Some(error.message.clone()); });
+                self.modify(id, |r| { r.status = Status::Retrying; r.error = Some(error.message.clone()); });
                 if let Some(live) = self.live.lock().unwrap().get_mut(id) {
                     live.info.note = Some(format!("{} Retrying in {} s.", error.message, delay.as_secs().max(1)));
                 }
@@ -525,7 +581,7 @@ impl Manager {
                 }
             }
         }
-        self.emit(id);
+        self.changed(id);
     }
 
     fn finish(self: &Arc<Self>, id: &str, job: Job, result: flux_engine::Result<Outcome>) {
@@ -769,7 +825,7 @@ impl Manager {
             live.info.phase = seeding.then(|| "Sharing the finished files".into());
             live.info.phase_fraction = None;
         }
-        self.emit(id);
+        self.changed(id);
     }
 
     // ------------------------------------------------------------------ videos
@@ -846,7 +902,7 @@ impl Manager {
         match event {
             MediaEvent::Tracks(_) => {}
             MediaEvent::Progress { written, total, estimated, bytes_per_second } => {
-                self.update(id, |r| {
+                self.modify(id, |r| {
                     r.written = written;
                     r.total = total.or(r.total);
                     r.status = Status::Downloading;
@@ -860,7 +916,7 @@ impl Manager {
                 }
             }
             MediaEvent::Phase { text, fraction } => {
-                self.update(id, |r| r.status = Status::Finishing);
+                self.modify(id, |r| r.status = Status::Finishing);
                 if let Some(live) = self.live.lock().unwrap().get_mut(id) {
                     live.info.speed = 0.0;
                     live.info.phase = Some(text);
@@ -873,7 +929,7 @@ impl Manager {
                 }
             }
         }
-        self.emit(id);
+        self.changed(id);
     }
 
     /// When a started queue has nothing left: its sound, the file to open, then its "after" action.
@@ -1060,10 +1116,14 @@ impl Manager {
         self.add(AddRequest { url: record.url, file_name: Some(name), session: record.session, start: Some("now".into()), video, ..Default::default() })
     }
     pub fn shutdown(&self) {
-        for live in self.live.lock().unwrap().values() {
-            live.cancel.cancel();
-        }
-        self.save_all();
+        // Every other record was saved when it changed: only the running ones and unsaved checkpoints remain.
+        let running: Vec<String> = {
+            let live = self.live.lock().unwrap();
+            live.values().for_each(|l| l.cancel.cancel());
+            live.keys().cloned().collect()
+        };
+        self.dirty.lock().unwrap().extend(running);
+        self.save_dirty();
     }
 }
 

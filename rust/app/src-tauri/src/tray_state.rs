@@ -128,13 +128,16 @@ pub fn watch(app: AppHandle) {
                 light = light_taskbar();
             }
             let background = app.state::<Background>();
-            let all = app.state::<Shared>().views();
             let now = now_ms();
             let views: Vec<View> = {
-                let mut ids = background.ids.lock().unwrap();
+                let wanted = background.ids.lock().unwrap().clone();
+                if wanted.is_empty() && shown.0.is_empty() {
+                    continue;
+                }
+                let found = app.state::<Shared>().views_where(|r| wanted.contains(&r.id));
                 // Downloads removed from the list leave the background too.
-                ids.retain(|id| all.iter().any(|v| &v.id == id));
-                all.into_iter().filter(|v| ids.contains(&v.id)).collect()
+                background.ids.lock().unwrap().retain(|id| found.iter().any(|v| &v.id == id));
+                found
             };
             // A finished download shows its check for a few seconds, then leaves the icon.
             {

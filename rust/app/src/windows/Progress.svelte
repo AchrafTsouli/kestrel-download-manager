@@ -28,6 +28,7 @@
     });
     const subs = [
       listen<Download>("download", ({ payload }) => { if (payload.id === id) d = payload; }),
+      listen<Download[]>("downloads", ({ payload }) => { const mine = payload.find((x) => x.id === id); if (mine) d = mine; }),
       listen<string[]>("removed", ({ payload }) => { if (payload.includes(id)) win.close(); }),
       listen<Settings>("settings", ({ payload }) => (settings = payload)),
     ];
