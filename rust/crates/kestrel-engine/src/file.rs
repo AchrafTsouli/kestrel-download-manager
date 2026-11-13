@@ -62,6 +62,7 @@ impl PartFile {
     pub fn sync(&self) -> std::io::Result<()> {
         self.file.sync_data()
     }
+    #[allow(clippy::len_without_is_empty)] // the size on disk; "empty" means nothing here
     pub fn len(&self) -> std::io::Result<u64> {
         Ok(self.file.metadata()?.len())
     }

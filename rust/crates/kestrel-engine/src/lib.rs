@@ -19,7 +19,8 @@ pub mod session;
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::Arc;
+use parking_lot::{Mutex, RwLock};
 use std::time::{Duration, Instant};
 
 use futures_util::StreamExt;
@@ -236,14 +237,14 @@ impl Engine {
             None => None,
         };
         let client = build_client(proxy, system_proxy)?;
-        *self.client.write().unwrap() = client;
-        *self.user_agent.write().unwrap() = agent;
+        *self.client.write() = client;
+        *self.user_agent.write() = agent;
         Ok(())
     }
 
     fn headers(&self, job: &Job, target: &Url, session: Option<&Session>) -> HeaderMap {
         let mut headers = HeaderMap::new();
-        let agent = self.user_agent.read().unwrap().clone().unwrap_or(HeaderValue::from_static(DEFAULT_USER_AGENT));
+        let agent = self.user_agent.read().clone().unwrap_or(HeaderValue::from_static(DEFAULT_USER_AGENT));
         headers.insert(header::USER_AGENT, agent);
         headers.insert(header::ACCEPT, HeaderValue::from_static("*/*"));
         headers.insert(header::ACCEPT_LANGUAGE, HeaderValue::from_static("en-US,en;q=0.9"));
@@ -259,7 +260,7 @@ impl Engine {
 
     async fn send(&self, job: &Job, session: Option<&Session>, range: Option<(u64, Option<u64>)>, if_range: Option<&str>) -> Result<reqwest::Response> {
         let target = job.resume.final_url.as_deref().and_then(|u| Url::parse(u).ok()).unwrap_or_else(|| job.url.clone());
-        let client = self.client.read().unwrap().clone();
+        let client = self.client.read().clone();
         let mut request = client.get(target.clone()).headers(self.headers(job, &target, session));
         if let Some((start, end)) = range {
             request = request.header(header::RANGE, match end { Some(end) => format!("bytes={start}-{end}"), None => format!("bytes={start}-") });
@@ -436,12 +437,15 @@ impl Engine {
         }
 
         // Finish: every byte present, flushed, optionally verified, then renamed into place.
-        if job.resume.total.is_none() {
-            let written = job.resume.plan.segments[0].done;
-            job.resume.total = Some(written);
-            job.resume.plan.segments[0].end = Some(written.saturating_sub(1));
-        }
-        let total = job.resume.total.unwrap();
+        let total = match job.resume.total {
+            Some(total) => total,
+            None => {
+                let written = job.resume.plan.segments[0].done;
+                job.resume.total = Some(written);
+                job.resume.plan.segments[0].end = Some(written.saturating_sub(1));
+                written
+            }
+        };
         if total > 0 && !job.resume.plan.complete(Some(total)) {
             return Err(Error::network("The connection ended before the file was complete.").retryable());
         }
@@ -472,7 +476,7 @@ impl Engine {
         let ranged = job.resume.ranged;
         let workers = if ranged { connections } else { 1 };
         let running = Arc::new(AtomicUsize::new(workers));
-        let written = Arc::new(AtomicU64::new(plan.lock().unwrap().written()));
+        let written = Arc::new(AtomicU64::new(plan.lock().written()));
         let stop = cancel.child_token();
         let shared_job = Arc::new(job.clone());
         let mut tasks = tokio::task::JoinSet::new();
@@ -501,7 +505,7 @@ impl Engine {
                         let part = part.clone();
                         if tokio::task::spawn_blocking(move || part.sync()).await.is_ok_and(|r| r.is_ok()) {
                             let mut snapshot = resume.clone();
-                            snapshot.plan = plan.lock().unwrap().clone();
+                            snapshot.plan = plan.lock().clone();
                             events(Event::Checkpoint(snapshot));
                         }
                     }
@@ -526,7 +530,7 @@ impl Engine {
         }
         stop.cancel();
         let _ = ticker.await;
-        let mut final_plan = std::mem::take(&mut *plan.lock().unwrap());
+        let mut final_plan = std::mem::take(&mut *plan.lock());
         final_plan.segments.iter_mut().for_each(|s| s.active = false);
         job.resume.plan = final_plan;
         events(Event::Progress { written: written.load(Ordering::Relaxed), total: job.resume.total, bytes_per_second: 0.0, connections: 0 });
@@ -545,7 +549,7 @@ impl Engine {
             if stop.is_cancelled() {
                 return Ok(());
             }
-            let claim = plan.lock().unwrap().claim(self.options.min_split, max_segments);
+            let claim = plan.lock().claim(self.options.min_split, max_segments);
             let Some(claim) = claim else {
                 // Nothing to take now. While another part is still coming, stay: when it turns out
                 // slow, this connection takes over half of what it has left (no "stuck at 99 %").
@@ -553,7 +557,7 @@ impl Engine {
                 let notified = wake.notified();
                 tokio::pin!(notified);
                 notified.as_mut().enable();
-                if !plan.lock().unwrap().segments.iter().any(|s| s.active && !s.finished()) {
+                if !plan.lock().segments.iter().any(|s| s.active && !s.finished()) {
                     return Ok(());
                 }
                 tokio::select! {
@@ -561,10 +565,10 @@ impl Engine {
                     _ = &mut notified => continue,
                     _ = stop.cancelled() => return Ok(()),
                 }
-                let help = plan.lock().unwrap().help_slowest(ENDGAME_SPLIT, ENDGAME_SECONDS, max_segments);
+                let help = plan.lock().help_slowest(ENDGAME_SPLIT, ENDGAME_SECONDS, max_segments);
                 let Some(claim) = help else { continue };
                 let result = self.transfer(job, plan, claim.index, part, written, stop).await;
-                plan.lock().unwrap().release(claim.index);
+                plan.lock().release(claim.index);
                 wake.notify_waiters();
                 match result {
                     Ok(()) => {}
@@ -578,10 +582,10 @@ impl Engine {
                 }
                 continue;
             };
-            let before = plan.lock().unwrap().segments[claim.index].position();
+            let before = plan.lock().segments[claim.index].position();
             let result = self.transfer(job, plan, claim.index, part, written, stop).await;
-            let moved = plan.lock().unwrap().segments[claim.index].position() > before;
-            plan.lock().unwrap().release(claim.index);
+            let moved = plan.lock().segments[claim.index].position() > before;
+            plan.lock().release(claim.index);
             wake.notify_waiters();
             match result {
                 Ok(()) => cuts = 0,
@@ -612,7 +616,7 @@ impl Engine {
 
     async fn transfer(&self, job: &Job, plan: &Mutex<Plan>, index: usize, part: &file::PartFile, written: &AtomicU64, stop: &CancellationToken) -> Result<()> {
         let (position, end) = {
-            let plan = plan.lock().unwrap();
+            let plan = plan.lock();
             let segment = &plan.segments[index];
             if segment.finished() { return Ok(()); }
             (segment.position(), segment.end)
@@ -653,7 +657,7 @@ impl Engine {
         let mut buffer_start = offset;
         let (started, mut received, mut flushed_at, mut clipped) = (Instant::now(), 0u64, Instant::now(), false);
         let clip = |buffer: &mut Vec<u8>, at: u64| -> bool {
-            let end = plan.lock().unwrap().segments[index].end;
+            let end = plan.lock().segments[index].end;
             let room = end.map(|end| (end + 1).saturating_sub(at) as usize).unwrap_or(usize::MAX);
             let clipped = buffer.len() > room;
             buffer.truncate(room);
@@ -671,7 +675,7 @@ impl Engine {
                 Ok(Some(Ok(chunk))) => chunk,
             };
             // The segment may have been shortened by a split meanwhile: never write past its end.
-            let limit = plan.lock().unwrap().segments[index].end;
+            let limit = plan.lock().segments[index].end;
             let room = limit.map(|end| (end + 1).saturating_sub(offset)).unwrap_or(u64::MAX);
             let take = (chunk.len() as u64).min(room) as usize;
             self.global_limiter.take(take).await;
@@ -690,7 +694,7 @@ impl Engine {
                 data.clear();
                 buffer = data;
                 {
-                    let mut plan = plan.lock().unwrap();
+                    let mut plan = plan.lock();
                     let segment = &mut plan.segments[index];
                     segment.done += len;
                     segment.speed = (received as f64 / started.elapsed().as_secs_f64().max(0.001)) as u64;
@@ -706,13 +710,13 @@ impl Engine {
         clip(&mut buffer, buffer_start);
         if !buffer.is_empty() {
             let (len, _) = flush(&mut buffer, buffer_start).await?;
-            plan.lock().unwrap().segments[index].done += len;
+            plan.lock().segments[index].done += len;
             written.fetch_add(len, Ordering::Relaxed);
         }
         if stop.is_cancelled() {
             return Ok(());
         }
-        let segment = plan.lock().unwrap().segments[index].clone();
+        let segment = plan.lock().segments[index].clone();
         if segment.end.is_some() && !segment.finished() {
             return Err(Error::network("The connection ended before its part was complete."));
         }
@@ -795,6 +799,19 @@ fn hash_file(path: &Path) -> std::io::Result<String> {
     Ok(hasher.finalize().iter().map(|b| format!("{b:02x}")).collect())
 }
 
+/// The start of a response body, at most `max` bytes (for reading a download page).
+async fn read_some(mut response: reqwest::Response, max: usize) -> Vec<u8> {
+    let mut body = Vec::new();
+    while body.len() < max {
+        match tokio::time::timeout(Duration::from_secs(10), response.chunk()).await {
+            Ok(Ok(Some(chunk))) => body.extend_from_slice(&chunk),
+            _ => break,
+        }
+    }
+    body.truncate(max);
+    body
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -809,17 +826,4 @@ mod tests {
         assert_eq!(disposition_name("attachment; filename=\"x.bin\"; filename*=UTF-8''r%C3%A9sum%C3%A9.pdf"), Some("résumé.pdf".into()));
         assert_eq!(content_range("bytes 0-0/12345"), Some((0, 0, Some(12345))));
     }
-}
-
-/// The start of a response body, at most `max` bytes (for reading a download page).
-async fn read_some(mut response: reqwest::Response, max: usize) -> Vec<u8> {
-    let mut body = Vec::new();
-    while body.len() < max {
-        match tokio::time::timeout(Duration::from_secs(10), response.chunk()).await {
-            Ok(Ok(Some(chunk))) => body.extend_from_slice(&chunk),
-            _ => break,
-        }
-    }
-    body.truncate(max);
-    body
 }

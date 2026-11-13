@@ -4,7 +4,7 @@
 
 use std::collections::HashMap;
 use std::path::Path;
-use std::sync::Mutex;
+use parking_lot::Mutex;
 
 static CACHE: Mutex<Option<HashMap<String, Option<String>>>> = Mutex::new(None);
 
@@ -18,7 +18,7 @@ pub fn data_url(path: &Path, exists: bool) -> Option<String> {
     let mine = exists && own_icon(path);
     let ext = path.extension().map(|e| e.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
     let key = if mine { path.to_string_lossy().to_lowercase() } else { format!(".{ext}") };
-    if let Some(hit) = CACHE.lock().unwrap().get_or_insert_with(HashMap::new).get(&key) {
+    if let Some(hit) = CACHE.lock().get_or_insert_with(HashMap::new).get(&key) {
         return hit.clone();
     }
     let png = platform::icon_png(path, mine);
@@ -26,7 +26,7 @@ pub fn data_url(path: &Path, exists: bool) -> Option<String> {
         use base64::Engine;
         format!("data:image/png;base64,{}", base64::engine::general_purpose::STANDARD.encode(bytes))
     });
-    CACHE.lock().unwrap().get_or_insert_with(HashMap::new).insert(key, url.clone());
+    CACHE.lock().get_or_insert_with(HashMap::new).insert(key, url.clone());
     url
 }
 

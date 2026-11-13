@@ -55,7 +55,7 @@ impl Engine {
         if types.is_empty() {
             return Err("Name at least one file type, for example: zip pdf mp4.".into());
         }
-        let client = self.client.read().unwrap().clone();
+        let client = self.client.read().clone();
         let job = crate::Job::new(root.clone(), std::env::temp_dir().join("kestrel-grabber"));
         let mut pages = VecDeque::from([root.clone()]);
         let mut visited = HashSet::new();

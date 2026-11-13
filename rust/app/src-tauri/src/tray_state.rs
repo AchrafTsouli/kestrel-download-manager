@@ -4,7 +4,7 @@
 //! download picked there gets its progress window back. The icon goes away when none are left.
 
 use std::collections::{HashMap, HashSet};
-use std::sync::Mutex;
+use parking_lot::Mutex;
 use std::time::Duration;
 
 use tauri::image::Image;
@@ -33,11 +33,11 @@ pub struct Background {
 
 impl Background {
     pub fn add(&self, id: &str) {
-        self.ids.lock().unwrap().insert(id.to_string());
+        self.ids.lock().insert(id.to_string());
     }
     pub fn remove(&self, id: &str) {
-        self.ids.lock().unwrap().remove(id);
-        self.finished_at.lock().unwrap().remove(id);
+        self.ids.lock().remove(id);
+        self.finished_at.lock().remove(id);
     }
 }
 
@@ -87,7 +87,9 @@ fn line(v: &View) -> String {
 
 /// The menu and its lines by download ID, so the lines can be updated in place: replacing the
 /// menu every second would close it while the user is reading it.
-fn menu(app: &AppHandle, views: &[View]) -> tauri::Result<(Menu<tauri::Wry>, HashMap<String, MenuItem<tauri::Wry>>)> {
+type MenuWithLines = (Menu<tauri::Wry>, HashMap<String, MenuItem<tauri::Wry>>);
+
+fn menu(app: &AppHandle, views: &[View]) -> tauri::Result<MenuWithLines> {
     let menu = Menu::new(app)?;
     let mut items = HashMap::new();
     for v in views {
@@ -124,24 +126,24 @@ pub fn watch(app: AppHandle) {
         loop {
             tokio::time::sleep(Duration::from_secs(1)).await;
             tick += 1;
-            if tick % 10 == 0 {
+            if tick.is_multiple_of(10) {
                 light = light_taskbar();
             }
             let background = app.state::<Background>();
             let now = now_ms();
             let views: Vec<View> = {
-                let wanted = background.ids.lock().unwrap().clone();
+                let wanted = background.ids.lock().clone();
                 if wanted.is_empty() && shown.0.is_empty() {
                     continue;
                 }
                 let found = app.state::<Shared>().views_where(|r| wanted.contains(&r.id));
                 // Downloads removed from the list leave the background too.
-                background.ids.lock().unwrap().retain(|id| found.iter().any(|v| &v.id == id));
+                background.ids.lock().retain(|id| found.iter().any(|v| &v.id == id));
                 found
             };
             // A finished download shows its check for a few seconds, then leaves the icon.
             {
-                let mut finished = background.finished_at.lock().unwrap();
+                let mut finished = background.finished_at.lock();
                 for v in views.iter().filter(|v| v.status == Status::Completed) {
                     finished.entry(v.id.clone()).or_insert(now);
                 }
@@ -151,7 +153,7 @@ pub fn watch(app: AppHandle) {
                     background.remove(&id);
                 }
             }
-            let views: Vec<View> = views.into_iter().filter(|v| background.ids.lock().unwrap().contains(&v.id)).collect();
+            let views: Vec<View> = views.into_iter().filter(|v| background.ids.lock().contains(&v.id)).collect();
 
             if views.is_empty() {
                 if !shown.0.is_empty() {
@@ -227,7 +229,7 @@ pub fn watch(app: AppHandle) {
                         if let Some(id) = id.strip_prefix("bg:") {
                             reopen(app, id);
                         } else if id == "bg-show-all" {
-                            let ids: Vec<String> = app.state::<Background>().ids.lock().unwrap().iter().cloned().collect();
+                            let ids: Vec<String> = app.state::<Background>().ids.lock().iter().cloned().collect();
                             for id in ids {
                                 reopen(app, &id);
                             }

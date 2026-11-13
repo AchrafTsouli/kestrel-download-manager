@@ -313,17 +313,13 @@ pub struct Settings {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
+#[derive(Default)]
 pub struct Sound {
     pub on: bool,
     /// A .wav file; empty = Windows' own sound.
     pub file: String,
 }
 
-impl Default for Sound {
-    fn default() -> Self {
-        Sound { on: false, file: String::new() }
-    }
-}
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
@@ -480,6 +476,13 @@ pub fn category_for(name: &str) -> &'static str {
     }
 }
 
+impl Record {
+    /// The order inside its queue: a place set in the Scheduler, else the time it was added.
+    pub fn queue_key(&self) -> u64 {
+        if self.queue_order > 0 { self.queue_order } else { self.added_ms }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -513,12 +516,5 @@ mod tests {
     fn scanner_arguments_keep_quoted_parts() {
         assert_eq!(crate::manager::split_arguments(r#"--scan "{file}" /quiet"#).unwrap(), ["--scan", "{file}", "/quiet"]);
         assert!(crate::manager::split_arguments(r#""unclosed"#).is_err());
-    }
-}
-
-impl Record {
-    /// The order inside its queue: a place set in the Scheduler, else the time it was added.
-    pub fn queue_key(&self) -> u64 {
-        if self.queue_order > 0 { self.queue_order } else { self.added_ms }
     }
 }

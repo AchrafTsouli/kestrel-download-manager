@@ -25,6 +25,7 @@ pub fn install(version: String) {
             // Errors can quote a path or an address; keep only the first line and cut it short.
             message.lines().next().unwrap_or("").chars().take(300).collect::<String>()
         );
+        crate::applog::error(format!("Internal error in thread {thread} at {place}: {}", message.lines().next().unwrap_or("")));
         let dir = folder();
         let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
         let _ = std::fs::create_dir_all(&dir).and_then(|_| std::fs::write(dir.join(format!("crash-{stamp}.txt")), report));

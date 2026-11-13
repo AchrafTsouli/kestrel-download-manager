@@ -33,7 +33,7 @@ jobs:
       - name: Tests (engine, storage, lab server)
         run: cargo test --workspace
       - name: Lints
-        run: cargo clippy --workspace --all-targets -- -D clippy::correctness -D clippy::suspicious
+        run: cargo clippy --workspace --all-targets -- -D warnings
       - name: App build (no installer yet)
         working-directory: rust/app
         run: npx tauri build --no-bundle

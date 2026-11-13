@@ -145,7 +145,7 @@ impl Session {
             .filter(|c| domain_matches(host, &c.domain, c.host_only) && (!c.secure || target.scheme() == "https")
                 && c.expires_unix_seconds.is_none_or(|e| e > now) && path_matches(target.path(), &c.path))
             .collect();
-        cookies.sort_by(|a, b| b.path.len().cmp(&a.path.len()));
+        cookies.sort_by_key(|c| std::cmp::Reverse(c.path.len()));
         if !cookies.is_empty() {
             let line = cookies.iter().map(|c| format!("{}={}", c.name, c.value)).collect::<Vec<_>>().join("; ");
             set(headers, "cookie", &line);

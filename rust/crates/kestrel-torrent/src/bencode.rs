@@ -64,11 +64,10 @@ fn read(data: &[u8], i: &mut usize, depth: usize, info: &mut Option<&mut Option<
                 let Value::Bytes(key) = read(data, i, depth + 1, &mut None)? else { return None };
                 let start = *i;
                 let value = read(data, i, depth + 1, &mut None)?;
-                if key == b"info" {
-                    if let Some(span) = info.as_deref_mut() {
+                if key == b"info"
+                    && let Some(span) = info.as_deref_mut() {
                         *span = Some((start, *i));
                     }
-                }
                 dict.insert(key, value);
             }
             (*i < data.len()).then(|| *i += 1)?;

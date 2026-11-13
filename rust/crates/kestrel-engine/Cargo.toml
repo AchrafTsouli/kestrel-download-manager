@@ -7,6 +7,7 @@ license.workspace = true
 publish = false
 
 [dependencies]
+parking_lot.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
 reqwest.workspace = true
@@ -23,6 +24,7 @@ windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Storage
 
 [dev-dependencies]
 labserver.workspace = true
+kestrel-update.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
 serde_json.workspace = true

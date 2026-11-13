@@ -20,6 +20,7 @@ pub struct Segment {
 }
 
 impl Segment {
+    #[allow(clippy::len_without_is_empty)] // unknown (None) until the size is known
     pub fn len(&self) -> Option<u64> {
         self.end.map(|end| end - self.start + 1)
     }
@@ -79,7 +80,8 @@ impl Plan {
                     if segment.start != next || !segment.finished() {
                         return false;
                     }
-                    next = segment.end.unwrap() + 1;
+                    let Some(end) = segment.end else { return false };
+                    next = end + 1;
                 }
                 next == total
             }

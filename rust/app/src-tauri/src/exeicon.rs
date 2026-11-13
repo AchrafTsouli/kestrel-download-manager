@@ -69,7 +69,7 @@ fn entries(res: &[u8], at: usize) -> Vec<(u32, usize, bool)> {
 }
 
 /// The data of the first language of resource `kind` (with `id`, or the first one).
-fn resource<'a>(res: &'a [u8], base_rva: u32, kind: u32, id: Option<u32>) -> Option<&'a [u8]> {
+fn resource(res: &[u8], base_rva: u32, kind: u32, id: Option<u32>) -> Option<&[u8]> {
     let (_, types, _) = entries(res, 0).into_iter().find(|(n, _, dir)| *n == kind && *dir)?;
     let (_, names, _) = entries(res, types).into_iter().find(|(n, _, dir)| *dir && id.is_none_or(|id| *n == id))?;
     let (_, data, dir) = entries(res, names).into_iter().next()?;

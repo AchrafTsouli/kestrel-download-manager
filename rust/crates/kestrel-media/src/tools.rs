@@ -5,7 +5,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
-use std::sync::Mutex;
+use parking_lot::Mutex;
 
 use kestrel_engine::Session;
 use serde_json::Value;
@@ -79,7 +79,7 @@ impl Tools {
     }
 
     pub fn set_proxy(&self, proxy: Option<String>) {
-        *self.proxy.lock().unwrap() = proxy;
+        *self.proxy.lock() = proxy;
     }
 
     /// `name` in the tools folder ("yt-dlp.exe" on Windows, "yt-dlp" elsewhere).
@@ -126,7 +126,7 @@ impl Tools {
         }
         args.push("--ffmpeg-location".into());
         args.push(self.directory.display().to_string());
-        if let Some(proxy) = self.proxy.lock().unwrap().clone() {
+        if let Some(proxy) = self.proxy.lock().clone() {
             args.extend(["--proxy".into(), proxy]);
         }
         if let Some(cookies) = cookies {
@@ -203,7 +203,7 @@ impl Tools {
     /// The system's own H.264 encoder (Windows Media Foundation, Apple VideoToolbox), or x264 in a
     /// system FFmpeg on Linux.
     async fn cut_encoder(&self) -> Option<&'static str> {
-        if let Some(known) = *self.exact_cut.lock().unwrap() {
+        if let Some(known) = *self.exact_cut.lock() {
             return known;
         }
         let args = ["-hide_banner".to_string(), "-encoders".to_string()];
@@ -212,7 +212,7 @@ impl Tools {
             _ => String::new(),
         };
         let found = ["h264_mf", "h264_videotoolbox", "libx264"].into_iter().find(|e| list.contains(&format!(" {e} ")));
-        *self.exact_cut.lock().unwrap() = Some(found);
+        *self.exact_cut.lock() = Some(found);
         found
     }
 

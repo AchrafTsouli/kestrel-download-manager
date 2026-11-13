@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "test:ui": "node tests/ui-e2e.mjs"
   },
   "dependencies": {
     "@crabnebula/tauri-plugin-drag": "^2.1.0",

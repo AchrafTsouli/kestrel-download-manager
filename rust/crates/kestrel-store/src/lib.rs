@@ -36,11 +36,10 @@ pub fn default_directory() -> PathBuf {
     if let Some(dir) = std::env::var_os("KESTREL_DATA_DIR").map(PathBuf::from).filter(|d| d.is_absolute()) {
         return dir;
     }
-    if is_portable() {
-        if let Some(folder) = program_folder() {
+    if is_portable()
+        && let Some(folder) = program_folder() {
             return folder.join("data");
         }
-    }
     let var = |name: &str| std::env::var_os(name).map(PathBuf::from).filter(|p| p.is_absolute());
     let base = if cfg!(windows) {
         var("LOCALAPPDATA")

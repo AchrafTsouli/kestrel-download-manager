@@ -23,10 +23,11 @@ pub fn taskbar_progress(app: AppHandle) {
             let retrying = running.iter().any(|v| v.status == Status::Retrying);
             let state = if running.is_empty() {
                 (0, 0)
-            } else if total == 0 {
-                (1, 0) // sizes not known yet
             } else {
-                (if retrying { 3 } else { 2 }, written * 100 / total)
+                match (written * 100).checked_div(total) {
+                    None => (1, 0), // sizes not known yet
+                    Some(percent) => (if retrying { 3 } else { 2 }, percent),
+                }
             };
             if last == Some(state) {
                 continue;
@@ -50,7 +51,7 @@ fn in_view(app: &AppHandle) -> bool {
 }
 
 fn notify(app: &AppHandle, title: &'static str, body: &str) {
-    let language = crate::i18n::resolve(&app.state::<Shared>().settings.read().unwrap().language);
+    let language = crate::i18n::resolve(&app.state::<Shared>().settings.read().language);
     let _ = app.notification().builder().title(crate::i18n::tr(language, title)).body(body).show();
 }
 

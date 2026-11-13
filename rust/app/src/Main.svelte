@@ -400,6 +400,7 @@
       { label: "Keyboard shortcuts", run: () => { shortcuts = true; menu = null; } },
       { label: "Home page", sep: true, run: () => web(HOME) },
       { label: "Report a problem", run: () => web(`${HOME}/issues/new`) },
+      { label: "Open log", run: () => { menu = null; call("open_log").catch((e) => (message = String(e))); } },
       { label: "Check for updates…", run: checkUpdates },
       { label: "Tell a friend", sep: true, run: tellFriend },
       { label: "About Kestrel", run: () => { about = true; menu = null; } },

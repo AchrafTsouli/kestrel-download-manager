@@ -1,0 +1,38 @@
+name: Nightly real-site checks
+
+# Real downloads that the lab-server tests cannot cover: GitHub release redirects, a streamed file,
+# a public HLS video stream through yt-dlp and FFmpeg, and the Sintel torrent through aria2.
+# A failure here usually means a site changed, not that Kestrel did. GitHub e-mails the owner.
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+jobs:
+  real-sites:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: rust
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+      - name: Video tools (verified against video-tools/sources.json)
+        working-directory: .
+        run: pwsh scripts/Get-VideoTools.ps1 -Repository ${{ github.repository }}
+      - name: Downloads from real sites
+        run: cargo test -p kestrel-engine --test real_sites -- --ignored --test-threads 1
+      - name: Video stream (yt-dlp, FFmpeg)
+        if: always()
+        env:
+          KESTREL_VIDEO_TOOLS: ${{ github.workspace }}\video-tools
+        run: cargo test -p kestrel-media --test real_tools -- --ignored --test-threads 1
+      - name: Torrent (aria2, Sintel)
+        if: always()
+        env:
+          KESTREL_ARIA2: ${{ github.workspace }}\video-tools\aria2c.exe
+        run: cargo test -p kestrel-torrent --test real_aria2 -- --ignored --nocapture

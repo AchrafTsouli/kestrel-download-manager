@@ -80,13 +80,12 @@ fn last_name(url: &Url) -> String {
         let mut out = Vec::with_capacity(raw.len());
         let mut i = 0;
         while i < raw.len() {
-            if raw[i] == b'%' && i + 2 < raw.len() {
-                if let Ok(v) = u8::from_str_radix(&segment[i + 1..i + 3], 16) {
+            if raw[i] == b'%' && i + 2 < raw.len()
+                && let Ok(v) = u8::from_str_radix(&segment[i + 1..i + 3], 16) {
                     out.push(v);
                     i += 3;
                     continue;
                 }
-            }
             out.push(raw[i]);
             i += 1;
         }

@@ -14,7 +14,8 @@ pub struct Browser {
 }
 
 /// Each browser: id, name, extensions page, where its program usually is (under these folders).
-const KNOWN: [(&str, &str, &str, &[(&str, &str)]); 5] = [
+type Known = (&'static str, &'static str, &'static str, &'static [(&'static str, &'static str)]);
+const KNOWN: [Known; 5] = [
     ("chrome", "Google Chrome", "chrome://extensions", &[("ProgramFiles", r"Google\Chrome\Application\chrome.exe"), ("ProgramFiles(x86)", r"Google\Chrome\Application\chrome.exe"), ("LOCALAPPDATA", r"Google\Chrome\Application\chrome.exe")]),
     ("edge", "Microsoft Edge", "edge://extensions", &[("ProgramFiles(x86)", r"Microsoft\Edge\Application\msedge.exe"), ("ProgramFiles", r"Microsoft\Edge\Application\msedge.exe")]),
     ("brave", "Brave", "brave://extensions", &[("ProgramFiles", r"BraveSoftware\Brave-Browser\Application\brave.exe"), ("LOCALAPPDATA", r"BraveSoftware\Brave-Browser\Application\brave.exe")]),

@@ -121,10 +121,11 @@ pub fn recycle(path: &Path) {
 }
 
 fn unpack(archive: &Path, into: &Path) -> Result<String, String> {
-    std::fs::create_dir_all(&into).map_err(|e| e.to_string())?;
+    std::fs::create_dir_all(into).map_err(|e| e.to_string())?;
     let lower = archive.to_string_lossy().to_ascii_lowercase();
-    let result = if lower.ends_with(".zip") {
-        unzip(archive, &into).map(|n| format!("{n} file{}", if n == 1 { "" } else { "s" }))
+    
+    if lower.ends_with(".zip") {
+        unzip(archive, into).map(|n| format!("{n} file{}", if n == 1 { "" } else { "s" }))
     } else {
         let tool = seven_zip().ok_or("Install 7-Zip (7-zip.org) to unpack this kind of archive.")?;
         let mut command = std::process::Command::new(tool);
@@ -140,10 +141,6 @@ fn unpack(archive: &Path, into: &Path) -> Result<String, String> {
             Ok(out) => Err(format!("7-Zip could not unpack it: {}", String::from_utf8_lossy(&out.stderr).lines().last().unwrap_or("").trim())),
             Err(e) => Err(e.to_string()),
         }
-    };
-    match result {
-        Ok(what) => Ok(what),
-        Err(error) => Err(error),
     }
 }
 

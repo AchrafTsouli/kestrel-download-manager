@@ -384,6 +384,7 @@ mod seed {
     /// KESTREL_TEST_DOWNLOADS, and no 1.x import.
     #[test]
     #[ignore]
+    #[allow(clippy::field_reassign_with_default)]
     fn seed_test_profile() {
         let dir = kestrel_store::default_directory();
         assert!(std::env::var_os("KESTREL_DATA_DIR").is_some(), "set KESTREL_DATA_DIR");

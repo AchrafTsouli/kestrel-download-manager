@@ -37,7 +37,7 @@ pub struct Tools {
     /// Saved metadata, one `<hash>.torrent` per torrent.
     pub cache: PathBuf,
     /// An HTTP proxy for trackers and web seeds (aria2 cannot send peer traffic through a proxy).
-    proxy: std::sync::Mutex<Option<String>>,
+    proxy: parking_lot::Mutex<Option<String>>,
 }
 
 fn common() -> Vec<String> {
@@ -58,7 +58,7 @@ fn common() -> Vec<String> {
 }
 
 fn last_line(text: &str) -> String {
-    text.lines().map(str::trim).filter(|l| !l.is_empty()).next_back().unwrap_or_default().chars().take(400).collect()
+    text.lines().map(str::trim).rfind(|l| !l.is_empty()).unwrap_or_default().chars().take(400).collect()
 }
 
 fn random_hex(bytes: usize) -> String {
@@ -69,16 +69,16 @@ fn random_hex(bytes: usize) -> String {
 
 impl Tools {
     pub fn new(aria2c: impl Into<PathBuf>, cache: impl Into<PathBuf>) -> Tools {
-        Tools { aria2c: aria2c.into(), cache: cache.into(), proxy: std::sync::Mutex::new(None) }
+        Tools { aria2c: aria2c.into(), cache: cache.into(), proxy: parking_lot::Mutex::new(None) }
     }
 
     /// Only HTTP proxies: aria2 has no SOCKS support.
     pub fn set_proxy(&self, proxy: Option<String>) {
-        *self.proxy.lock().unwrap() = proxy.filter(|p| p.starts_with("http://") || p.starts_with("https://"));
+        *self.proxy.lock() = proxy.filter(|p| p.starts_with("http://") || p.starts_with("https://"));
     }
 
     fn with_proxy(&self, mut args: Vec<String>) -> Vec<String> {
-        if let Some(proxy) = self.proxy.lock().unwrap().clone() {
+        if let Some(proxy) = self.proxy.lock().clone() {
             args.push(format!("--all-proxy={proxy}"));
         }
         args

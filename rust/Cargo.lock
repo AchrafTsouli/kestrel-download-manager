@@ -2695,6 +2695,7 @@ dependencies = [
  "kestrel-store",
  "kestrel-torrent",
  "kestrel-update",
+ "parking_lot",
  "png",
  "regex",
  "reqwest 0.12.28",
@@ -2729,7 +2730,9 @@ version = "2.0.0"
 dependencies = [
  "bytes",
  "futures-util",
+ "kestrel-update",
  "labserver",
+ "parking_lot",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
@@ -2759,6 +2762,7 @@ name = "kestrel-media"
 version = "2.0.0"
 dependencies = [
  "kestrel-engine",
+ "parking_lot",
  "pgp",
  "regex",
  "reqwest 0.12.28",
@@ -2802,6 +2806,7 @@ version = "2.0.0"
 dependencies = [
  "getrandom 0.2.17",
  "kestrel-engine",
+ "parking_lot",
  "reqwest 0.12.28",
  "serde",
  "serde_json",

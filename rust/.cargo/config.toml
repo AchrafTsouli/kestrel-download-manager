@@ -1,0 +1,5 @@
+# The C runtime is built into every Windows program (as Tauri already does for Kestrel.exe), so the
+# browser bridge and the command-line tool also run on a Windows without the Visual C++ runtime
+# installed. Found by scripts/Test-Upgrade.ps1 on a clean Windows Sandbox.
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]

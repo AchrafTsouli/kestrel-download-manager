@@ -53,7 +53,7 @@ pub fn keep_tools_current(app: AppHandle) {
             let manager = app.state::<Shared>().inner().clone();
             let marker = manager.media.update_directory.join("last-check");
             let due = std::fs::metadata(&marker).and_then(|m| m.modified()).ok().and_then(|t| SystemTime::now().duration_since(t).ok()).is_none_or(|age| age > Duration::from_secs(24 * 3600));
-            if manager.settings.read().unwrap().auto_update_tools && manager.media.available() && due {
+            if manager.settings.read().auto_update_tools && manager.media.available() && due {
                 let _ = std::fs::create_dir_all(&manager.media.update_directory);
                 let _ = std::fs::write(&marker, b"");
                 if let Ok(Some(version)) = kestrel_media::update::update(&manager.media.directory, &manager.media.update_directory).await {

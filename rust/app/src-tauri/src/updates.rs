@@ -26,7 +26,7 @@ fn current(app: &AppHandle) -> String {
 
 pub async fn check(app: &AppHandle) -> Result<UpdateInfo, String> {
     let manager = app.state::<Shared>().inner().clone();
-    let feed = manager.settings.read().unwrap().update_feed.clone();
+    let feed = manager.settings.read().update_feed.clone();
     let release = kestrel_update::check(&feed).await?;
     let mut settings = manager.settings();
     settings.last_update_check_ms = now_ms();
@@ -39,7 +39,7 @@ pub async fn check(app: &AppHandle) -> Result<UpdateInfo, String> {
 /// and runs it silently.
 pub async fn install(app: &AppHandle) -> Result<(), String> {
     let manager = app.state::<Shared>().inner().clone();
-    let feed = manager.settings.read().unwrap().update_feed.clone();
+    let feed = manager.settings.read().update_feed.clone();
     let release = kestrel_update::check(&feed).await?;
     if !kestrel_update::is_newer(&release.version, &current(app)) {
         return Err(format!("Kestrel {} is up to date.", current(app)));
@@ -71,16 +71,14 @@ pub fn check_daily(app: AppHandle) {
         tokio::time::sleep(Duration::from_secs(30)).await;
         loop {
             let (enabled, last) = {
-                let settings = app.state::<Shared>().settings.read().unwrap().clone();
+                let settings = app.state::<Shared>().settings.read().clone();
                 (settings.auto_check_updates, settings.last_update_check_ms)
             };
-            if enabled && now_ms().saturating_sub(last) > 24 * 3600 * 1000 {
-                if let Ok(info) = check(&app).await {
-                    if info.available {
+            if enabled && now_ms().saturating_sub(last) > 24 * 3600 * 1000
+                && let Ok(info) = check(&app).await
+                    && info.available {
                         let _ = app.emit("update-available", info);
                     }
-                }
-            }
             tokio::time::sleep(Duration::from_secs(3600)).await;
         }
     });

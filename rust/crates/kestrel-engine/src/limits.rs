@@ -1,7 +1,8 @@
 //! Remembered per-site connection limits and token-bucket speed limits.
 
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use parking_lot::Mutex;
 use std::time::{Duration, Instant};
 
 use url::Url;
@@ -28,7 +29,7 @@ impl HostLimits {
     }
     pub fn limit_for(&self, url: &Url) -> Option<usize> {
         let host = url.host_str()?.to_ascii_lowercase();
-        let limits = self.limits.lock().unwrap();
+        let limits = self.limits.lock();
         let mut candidate = host.as_str();
         loop {
             if let Some(limit) = limits.get(candidate) {
@@ -47,17 +48,17 @@ impl HostLimits {
         if self.limit_for(url).is_some_and(|known| known <= connections) {
             return;
         }
-        self.limits.lock().unwrap().insert(host.clone(), connections);
+        self.limits.lock().insert(host.clone(), connections);
         if let Some(callback) = &self.learned {
             callback(&host, connections);
         }
     }
     /// Replaces the remembered limits (the user forgot some in Options).
     pub fn replace(&self, limits: HashMap<String, usize>) {
-        *self.limits.lock().unwrap() = limits.into_iter().map(|(h, n)| (h.to_ascii_lowercase(), n.max(1))).collect();
+        *self.limits.lock() = limits.into_iter().map(|(h, n)| (h.to_ascii_lowercase(), n.max(1))).collect();
     }
     pub fn snapshot(&self) -> HashMap<String, usize> {
-        self.limits.lock().unwrap().clone()
+        self.limits.lock().clone()
     }
 }
 
@@ -90,18 +91,18 @@ impl Limiter {
         Limiter { inner: Arc::new(Mutex::new(Bucket { rate: bytes_per_second, tokens: 0.0, updated: Instant::now() })) }
     }
     pub fn set_rate(&self, bytes_per_second: u64) {
-        let mut bucket = self.inner.lock().unwrap();
+        let mut bucket = self.inner.lock();
         bucket.rate = bytes_per_second;
         bucket.tokens = bucket.tokens.min(bytes_per_second as f64);
     }
     pub fn rate(&self) -> u64 {
-        self.inner.lock().unwrap().rate
+        self.inner.lock().rate
     }
     /// Waits until `bytes` may pass. Bursts are capped at one second's worth.
     pub async fn take(&self, bytes: usize) {
         loop {
             let wait = {
-                let mut bucket = self.inner.lock().unwrap();
+                let mut bucket = self.inner.lock();
                 if bucket.rate == 0 {
                     return;
                 }
@@ -128,7 +129,7 @@ mod tests {
     fn subdomains_inherit_and_limits_only_go_down() {
         let learned = Arc::new(Mutex::new(Vec::new()));
         let seen = learned.clone();
-        let limits = HostLimits::new([]).on_learned(move |h, n| seen.lock().unwrap().push((h.to_string(), n)));
+        let limits = HostLimits::new([]).on_learned(move |h, n| seen.lock().push((h.to_string(), n)));
         let site = Url::parse("https://files.example.com/a").unwrap();
         assert_eq!(limits.limit_for(&site), None);
         limits.learn(&site, 3);
@@ -136,7 +137,7 @@ mod tests {
         assert_eq!(limits.limit_for(&Url::parse("https://cdn.files.example.com/b").unwrap()), Some(3));
         assert_eq!(limits.limit_for(&Url::parse("https://example.com/").unwrap()), None);
         assert_eq!(limits.limit_for(&Url::parse("https://x.gofile.io/d").unwrap()), Some(2));
-        assert_eq!(*learned.lock().unwrap(), vec![("files.example.com".to_string(), 3)]);
+        assert_eq!(*learned.lock(), vec![("files.example.com".to_string(), 3)]);
     }
 
     #[tokio::test]
