@@ -67,7 +67,7 @@ node --test BrowserExtension/*.test.js    # browser extension
 1. Raise `version` in `rust/Cargo.toml`, commit and push.
 2. `pwsh scripts/Publish-Release.ps1` builds the installer, signs `version.json` with the release key (`tools/release-signer`) and publishes both as a GitHub release. A version with a suffix (`2.1.0-beta.1`) is published as a pre-release.
 
-Installed copies (Kestrel and Flux 1.x) check `releases/latest/download/version.json` and only install a release signed with the project's key. The private key stays on the release computer; it never goes into the repository.
+Installed copies check `releases/latest/download/version.json` and only install a release signed with the project's key. The private key stays on the release computer; it never goes into the repository. Since 2.1 the feed is signed with a new key (field `signature2`): copies before 2.1 see it as unsigned and offer the download page, so they move to 2.1 with one manual install.
 
 ## Project layout
 

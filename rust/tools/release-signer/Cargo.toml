@@ -9,7 +9,8 @@ publish = false
 [dependencies]
 kestrel-update.workspace = true
 kestrel-store.workspace = true
-p256 = { version = "0.13", default-features = false, features = ["ecdsa", "pkcs8", "std"] }
+p256 = { version = "0.13", features = ["ecdsa", "pkcs8", "std"] }
 base64 = "0.22"
+rand_core = { version = "0.6", features = ["getrandom"] }
 sha2.workspace = true
 serde_json.workspace = true

@@ -5,7 +5,7 @@ param(
   [Parameter(Mandatory)][string]$DownloadUrl,
   [Parameter(Mandatory)][string]$Version,
   [string]$Output = (Join-Path (Split-Path -Parent $Installer) 'version.json'),
-  [string]$KeyPath = (Join-Path $env:LOCALAPPDATA 'ApexRelease\update-signing.key')
+  [string]$KeyPath = (Join-Path $env:LOCALAPPDATA 'KestrelRelease\update-signing-2.key')
 )
 $root = Split-Path -Parent $PSScriptRoot
 Push-Location (Join-Path $root 'rust')

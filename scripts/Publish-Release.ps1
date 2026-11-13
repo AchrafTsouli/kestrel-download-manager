@@ -28,7 +28,11 @@ try {
   git tag $tag; git push origin $tag
   $notesArgs = if ($Notes) { @('--notes', $Notes) } else { @('--generate-notes') }
   $preArgs = if ($version.Contains('-')) { @('--prerelease') } else { @() }
-  gh release create $tag $installer "$installer.sha256" $feed --title "Kestrel $version" @notesArgs @preArgs
+  # The portable zip from the same staged files.
+  & (Join-Path $PSScriptRoot 'Build-Portable.ps1') -SkipBuild
+  if ($LASTEXITCODE -ne 0) { throw 'The portable build failed.' }
+  $portable = Join-Path $root "installers/Kestrel-$version-win-x64-portable.zip"
+  gh release create $tag $installer "$installer.sha256" $feed $portable "$portable.sha256" --title "Kestrel $version" @notesArgs @preArgs
   Write-Output "Published ${tag}: https://github.com/$repo/releases/tag/$tag"
 }
 finally { Pop-Location }

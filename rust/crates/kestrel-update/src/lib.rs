@@ -15,6 +15,10 @@ use sha2::{Digest, Sha256};
 
 /// ECDSA P-256 public key (SubjectPublicKeyInfo, Base64), from `SwiftFetch.Core/UpdateSigningKey.cs`.
 pub const PUBLIC_KEY: &str = "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEr4A5xVXDDg3DgMK352ttyolZka2KjRdAOzMP3Ng4S/gfjQ1lnLgg7LQWpg3HdgPFevqIJx7QHQpliiVZ3enskQ==";
+/// The release key since Kestrel 2.1 (the first one was lost). Its signature is in the feed's
+/// "signature2" field, which copies before 2.1 do not read: for them the release is unsigned, so
+/// they offer its download page instead of refusing it.
+pub const PUBLIC_KEY_2: &str = "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE+PyReQ8uS5KEhNJ2bepnRe5OONiqc338y5c6WK3GE/5eN4WYEzFSHYbtXbO/njtBphytrWKEiHZFO7vHskj0zw==";
 pub const DEFAULT_FEED: &str = "https://github.com/AchrafTsouli/kestrel-download-manager/releases/latest/download/version.json";
 
 #[derive(Debug, Clone, PartialEq)]
@@ -53,14 +57,28 @@ pub fn is_newer(release: &str, current: &str) -> bool {
     matches!((parse_version(release), parse_version(current)), (Some(r), Some(c)) if r > c)
 }
 
+/// Reads the published feed: "signature2" checked with the current key, else "signature" with the first.
+pub fn parse_feed(json: &[u8]) -> Result<Release, String> {
+    let root: serde_json::Value = serde_json::from_slice(json).map_err(|_| "The update information is not readable.")?;
+    if root.get("signature2").and_then(|v| v.as_str()).is_some_and(|s| !s.is_empty()) {
+        parse_field(json, "signature2", PUBLIC_KEY_2)
+    } else {
+        parse(json, PUBLIC_KEY)
+    }
+}
+
 /// Reads a feed. A release can be installed automatically only when its signature verifies.
 pub fn parse(json: &[u8], public_key: &str) -> Result<Release, String> {
+    parse_field(json, "signature", public_key)
+}
+
+fn parse_field(json: &[u8], field: &str, public_key: &str) -> Result<Release, String> {
     let root: serde_json::Value = serde_json::from_slice(json).map_err(|_| "The update information is not readable.")?;
     let text = |name: &str| root.get(name).and_then(|v| v.as_str()).unwrap_or_default().to_string();
     let version = text("version");
     let url = Some(text("url")).filter(|u| !u.is_empty()).unwrap_or_else(|| text("downloadUrl"));
     let sha256 = text("sha256").to_ascii_lowercase();
-    let signature = text("signature");
+    let signature = text(field);
     if parse_version(&version).is_none() {
         return Err("Invalid release version.".into());
     }
@@ -103,7 +121,7 @@ pub async fn check(feed: &str) -> Result<Release, String> {
     if !feed.starts_with("https://") {
         return Err("The update feed must use HTTPS.".into());
     }
-    parse(&read(&client(Duration::from_secs(30))?, feed, 64 * 1024).await?, PUBLIC_KEY)
+    parse_feed(&read(&client(Duration::from_secs(30))?, feed, 64 * 1024).await?)
 }
 
 /// Downloads a signed installer and checks it against the signed checksum before it can run.
@@ -148,6 +166,17 @@ mod tests {
             let tampered = FEED_1_0_0.replacen(from, to, 1);
             assert!(parse(tampered.as_bytes(), PUBLIC_KEY).unwrap_err().contains("not valid"), "{from}");
         }
+    }
+
+    #[test]
+    fn a_feed_signed_with_the_second_key_is_unsigned_for_older_copies() {
+        // signature2 holds a signature that is not valid for PUBLIC_KEY_2: refused by 2.1+...
+        let feed = r#"{"version":"2.1.0","url":"https://example.test/s.exe","sha256":"abababababababababababababababababababababababababababababababab","signature2":"RcU3GgN25plSFXQ2Ls8k5obeidfZRLjElEBZ5RgifskFarIe4TyMYcxJ2j2+X01MPHVeebDHSVHjJFUFqloJMQ=="}"#;
+        assert!(parse_feed(feed.as_bytes()).is_err());
+        // ...while copies before 2.1 read only "signature": none, so an unsigned release (a download link).
+        assert!(!parse(feed.as_bytes(), PUBLIC_KEY).unwrap().signed);
+        // The 1.0.0 feed still verifies through parse_feed with the first key.
+        assert!(parse_feed(FEED_1_0_0.as_bytes()).unwrap().signed);
     }
 
     #[test]
