@@ -24,6 +24,8 @@ video-tools/*
 
 # The release signing key never lives in the repository (see scripts/New-UpdateKey.ps1).
 *.key
+# yt-dlp's published PGP public key (checks yt-dlp updates); no secret in it.
+!rust/crates/kestrel-media/src/yt-dlp-public.key
 
 # Machine-specific validation reports and personal debugging helpers (kept locally only).
 docs/measurements/installer*-validation.json
