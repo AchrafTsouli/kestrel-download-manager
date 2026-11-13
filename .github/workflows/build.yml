@@ -1,10 +1,11 @@
-name: Kestrel 2.0 (Rust)
+name: Kestrel (Rust)
 
 on:
   push:
     paths: ["rust/**", ".github/workflows/build.yml"]
   pull_request:
     paths: ["rust/**", ".github/workflows/build.yml"]
+  workflow_dispatch:
 
 jobs:
   windows:
@@ -39,7 +40,9 @@ jobs:
         run: npx tauri build --no-bundle
 
   # Linux and macOS: tests, then the packages (.deb + AppImage, .app + .dmg) kept as artifacts.
+  # Parked while Kestrel is Windows-only: run on request (Actions > Run workflow).
   unix:
+    if: github.event_name == 'workflow_dispatch'
     strategy:
       fail-fast: false
       matrix:
