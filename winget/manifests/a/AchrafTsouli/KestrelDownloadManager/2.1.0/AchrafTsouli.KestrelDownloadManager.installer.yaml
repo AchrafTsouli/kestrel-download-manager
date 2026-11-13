@@ -1,0 +1,27 @@
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.installer.1.6.0.schema.json
+PackageIdentifier: AchrafTsouli.KestrelDownloadManager
+PackageVersion: 2.1.0
+Platform:
+- Windows.Desktop
+MinimumOSVersion: 10.0.19045.0
+InstallerType: inno
+Scope: user
+InstallModes:
+- interactive
+- silent
+- silentWithProgress
+UpgradeBehavior: install
+ProductCode: '{F14B83CB-285D-459F-9E24-57D4E44F6D56}_is1'
+Dependencies:
+  PackageDependencies:
+  - PackageIdentifier: Microsoft.EdgeWebView2Runtime
+Protocols:
+- magnet
+FileExtensions:
+- torrent
+Installers:
+- Architecture: x64
+  InstallerUrl: https://github.com/AchrafTsouli/kestrel-download-manager/releases/download/v2.1.0/Kestrel-Setup-2.1.0-win-x64.exe
+  InstallerSha256: 49E65E56F46F4FCF9EEFD5FF4F99D2B58DC820750B830DA76321DD762A249395
+ManifestType: installer
+ManifestVersion: 1.6.0

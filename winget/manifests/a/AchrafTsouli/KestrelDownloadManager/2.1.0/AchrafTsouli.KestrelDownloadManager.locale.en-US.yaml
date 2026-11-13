@@ -1,0 +1,30 @@
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.defaultLocale.1.6.0.schema.json
+PackageIdentifier: AchrafTsouli.KestrelDownloadManager
+PackageVersion: 2.1.0
+PackageLocale: en-US
+Publisher: Achraf Tsouli
+PublisherUrl: https://github.com/AchrafTsouli
+PublisherSupportUrl: https://github.com/AchrafTsouli/kestrel-download-manager/issues
+PrivacyUrl: https://github.com/AchrafTsouli/kestrel-download-manager/blob/main/PRIVACY.md
+Author: Achraf Tsouli
+PackageName: Kestrel Download Manager
+PackageUrl: https://github.com/AchrafTsouli/kestrel-download-manager
+License: MIT
+LicenseUrl: https://github.com/AchrafTsouli/kestrel-download-manager/blob/main/LICENSE
+ShortDescription: A fast, free download manager for Windows, with browser capture, videos, torrents and FTP.
+Description: |-
+  Kestrel Download Manager (KDM) splits each download across several connections, resumes after a crash or a
+  lost connection, and catches downloads from Chrome, Edge, Brave and Firefox. It downloads videos (yt-dlp),
+  torrents and magnet links, and FTP/SFTP files, with queues, a scheduler, speed limits and signed updates.
+Moniker: kdm
+Tags:
+- download-manager
+- downloader
+- torrent
+- youtube-dl
+- yt-dlp
+- ftp
+- accelerator
+ReleaseNotesUrl: https://github.com/AchrafTsouli/kestrel-download-manager/releases/tag/v2.1.0
+ManifestType: defaultLocale
+ManifestVersion: 1.6.0
