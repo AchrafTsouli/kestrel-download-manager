@@ -1,7 +1,7 @@
-//! Torrents: magnet links and .torrent files, downloaded by aria2 running as a child process.
+//! Torrents: magnet links and .torrent files, downloaded inside Kestrel by librqbit.
 //! A port of Flux 1.x's `Torrents.cs` (proven on a real torrent: chosen files only, verified film).
 
-mod aria2;
+mod rqbit;
 mod bencode;
 
 use std::path::{Path, PathBuf};
@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use sha1::{Digest, Sha1};
 
-pub use aria2::{Outcome, Status, Tools};
+pub use rqbit::{Outcome, Status, Tools};
 
 /// Well-known public trackers, added after the torrent's own: many magnet links carry none that work.
 pub const PUBLIC_TRACKERS: &[&str] = &[
@@ -27,7 +27,7 @@ pub const PUBLIC_TRACKERS: &[&str] = &[
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TorrentFile {
-    /// 1-based, as aria2's --select-file counts.
+    /// 1-based (how Kestrel has always saved them).
     pub index: usize,
     /// Relative path inside the torrent's folder, every part made safe.
     pub path: String,

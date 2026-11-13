@@ -36,11 +36,25 @@ pub struct Selection {
     /// Subtitle languages to put into the file ("en.*,fr"); none = no subtitles.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub subtitles: Option<String>,
+    /// The audio track's language ("fr", "en"), when the site offers several; none = the site's default.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub audio_language: Option<String>,
+    /// Cut sponsor segments, self-promotion and reminders out (SponsorBlock's community data).
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub sponsorblock: bool,
+    /// Put the video's chapters into the file.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub chapters: bool,
 }
 
 /// "en", "fr.*", "pt-BR", "all", separated by commas: nothing a command line could misread.
 pub fn valid_languages(text: &str) -> bool {
     !text.is_empty() && text.len() <= 64 && text.split(',').all(|l| !l.is_empty() && l.bytes().all(|b| b.is_ascii_alphanumeric() || b"-_.*".contains(&b)) && !l.starts_with('-'))
+}
+
+/// One language code for the audio track: "en", "fr", "pt-BR".
+pub fn valid_audio_language(text: &str) -> bool {
+    (2..=12).contains(&text.len()) && text.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-') && !text.starts_with('-')
 }
 
 pub fn valid_format_id(id: &str) -> bool {
@@ -89,6 +103,9 @@ impl Selection {
         }
         if self.subtitles.as_deref().is_some_and(|l| !valid_languages(l)) {
             return Err("Write subtitle languages like: en, fr, pt-BR (or all).".into());
+        }
+        if self.audio_language.as_deref().is_some_and(|l| !valid_audio_language(l)) {
+            return Err("Write the audio language like: en, fr or pt-BR.".into());
         }
         if self.is_clip() {
             let start = self.clip_start.unwrap_or(0.0);

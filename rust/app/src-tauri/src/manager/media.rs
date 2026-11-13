@@ -1,4 +1,4 @@
-//! Torrents (aria2) and videos (yt-dlp, FFmpeg).
+//! Torrents (librqbit, inside Kestrel) and videos (yt-dlp, FFmpeg).
 
 use super::*;
 
@@ -208,14 +208,4 @@ pub(super) fn video_tools_directory() -> PathBuf {
     }
     let complete = |dir: &PathBuf| ["yt-dlp", "ffmpeg", "ffprobe"].iter().all(|n| program(dir, n).exists());
     candidates.iter().find(|d| complete(d)).cloned().unwrap_or_else(|| candidates[0].clone())
-}
-
-/// aria2 for torrents: with the video tools, or the system's own.
-pub(super) fn aria2_path() -> PathBuf {
-    let bundled = program(&video_tools_directory(), "aria2c");
-    if bundled.exists() || cfg!(windows) {
-        return bundled;
-    }
-    let path = std::env::var_os("PATH").map(|p| std::env::split_paths(&p).collect::<Vec<_>>()).unwrap_or_default();
-    path.iter().chain(&["/opt/homebrew/bin".into(), "/usr/local/bin".into(), "/usr/bin".into()]).map(|d| program(d, "aria2c")).find(|p| p.exists()).unwrap_or(bundled)
 }

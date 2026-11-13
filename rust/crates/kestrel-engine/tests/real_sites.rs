@@ -61,3 +61,28 @@ async fn a_streamed_download_arrives_whole() {
     assert_eq!(std::fs::metadata(&job.destination).unwrap().len(), 5000000);
     let _ = std::fs::remove_file(&job.destination);
 }
+
+/// FTP, FTPS (explicit TLS) and SFTP against Rebex's public test server (demo / password).
+#[tokio::test]
+#[ignore]
+async fn ftp_ftps_and_sftp_download_the_same_file() {
+    let known_hosts = std::env::temp_dir().join(format!("kestrel-known-hosts-{}", std::process::id()));
+    let engine = Engine::new(Options { known_hosts: Some(known_hosts.clone()), ..Options::default() }, HostLimits::new([]));
+    let mut contents = Vec::new();
+    for scheme in ["ftp", "ftps", "sftp"] {
+        let mut job = Job::new(Url::parse(&format!("{scheme}://demo:password@test.rebex.net/readme.txt")).unwrap(), destination(&format!("{scheme}-readme.txt")));
+        let outcome = engine.download(&mut job, |_| {}, CancellationToken::new()).await.unwrap_or_else(|e| panic!("{scheme}: {e}"));
+        assert!(matches!(outcome, Outcome::Completed { .. }), "{scheme}: {outcome:?}");
+        contents.push(std::fs::read(&job.destination).unwrap());
+        let _ = std::fs::remove_file(&job.destination);
+    }
+    assert!(!contents[0].is_empty());
+    assert!(contents.iter().all(|c| c == &contents[0]), "all three give the same file");
+    assert!(std::fs::read_to_string(&known_hosts).unwrap().contains("test.rebex.net:22 SHA256:"), "the SFTP key is remembered");
+    // A different key for the same host is refused.
+    std::fs::write(&known_hosts, "test.rebex.net:22 SHA256:not-the-real-key\n").unwrap();
+    let mut job = Job::new(Url::parse("sftp://demo:password@test.rebex.net/readme.txt").unwrap(), destination("sftp-again.txt"));
+    let error = engine.download(&mut job, |_| {}, CancellationToken::new()).await.unwrap_err();
+    assert!(error.message.contains("different key"), "{}", error.message);
+    let _ = std::fs::remove_file(known_hosts);
+}

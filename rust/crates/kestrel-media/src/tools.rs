@@ -288,6 +288,7 @@ impl Tools {
         args.extend(format_arguments(&job.selection));
         args.extend(clip_arguments(&job.selection));
         args.extend(subtitle_arguments(&job.selection));
+        args.extend(extra_arguments(&job.selection));
         args.extend([
             "--output".into(),
             work.join("result.%(ext)s").display().to_string(),
@@ -555,15 +556,22 @@ pub fn failure(error: &str) -> String {
 }
 
 fn format_arguments(selection: &Selection) -> Vec<String> {
+    // The chosen audio language first, the usual choice when the site has no such track.
+    let language = selection.audio_language.as_deref().filter(|l| formats::valid_audio_language(l));
     if !selection.is_preset() {
-        let mut args = vec!["--format".to_string(), selection.format_id.clone()];
+        let format = match (language, selection.format_id.split_once('+')) {
+            (Some(l), Some((video, audio))) => format!("{video}+ba[language^={l}]/{video}+{audio}"),
+            _ => selection.format_id.clone(),
+        };
+        let mut args = vec!["--format".to_string(), format];
         if selection.format_id.contains('+') {
             args.extend(["--merge-output-format".into(), if selection.extension == "m4a" { "mp4".into() } else { selection.extension.clone() }]);
         }
         return args;
     }
     if selection.audio_only {
-        return vec!["--format".into(), "ba[ext=m4a]/ba[acodec^=mp4a]/ba/b".into()];
+        let best = "ba[ext=m4a]/ba[acodec^=mp4a]/ba/b";
+        return vec!["--format".into(), language.map_or(best.to_string(), |l| format!("ba[language^={l}]/{best}"))];
     }
     // Prefer MP4/M4A so the tools copy streams without re-encoding; an exact cut also prefers H.264,
     // which the bundled FFmpeg can decode and re-encode.
@@ -572,7 +580,23 @@ fn format_arguments(selection: &Selection) -> Vec<String> {
         Some(height) => format!("{codec}res:{height},ext:mp4:m4a"),
         None => format!("{codec}ext:mp4:m4a"),
     };
-    vec!["--format".into(), "bv*+ba/b".into(), "--format-sort".into(), sort]
+    let format = language.map_or("bv*+ba/b".to_string(), |l| format!("bv*+ba[language^={l}]/bv*+ba/b"));
+    vec!["--format".into(), format, "--format-sort".into(), sort]
+}
+
+/// SponsorBlock and chapters: whole videos only (a clip's timing would not match).
+fn extra_arguments(selection: &Selection) -> Vec<String> {
+    let mut args = Vec::new();
+    if selection.is_clip() || selection.audio_only && !selection.sponsorblock {
+        return args;
+    }
+    if selection.sponsorblock {
+        args.extend(["--sponsorblock-remove", "sponsor,selfpromo,interaction"].map(String::from));
+    }
+    if selection.chapters && !selection.audio_only {
+        args.push("--embed-chapters".into());
+    }
+    args
 }
 
 /// Subtitles (the site's own, or automatic ones when that is all there is) put into the file.
@@ -672,6 +696,14 @@ mod tests {
         exact.clip_exact = true;
         assert_eq!(format_arguments(&exact)[3], "vcodec:h264,ext:mp4:m4a");
         assert_eq!(format_arguments(&Selection::preset(None, true))[1], "ba[ext=m4a]/ba[acodec^=mp4a]/ba/b");
+        let french = |s: Selection| Selection { audio_language: Some("fr".into()), ..s };
+        assert_eq!(format_arguments(&french(Selection::preset(Some(720), false)))[1], "bv*+ba[language^=fr]/bv*+ba/b");
+        assert_eq!(format_arguments(&french(Selection::preset(None, true)))[1], "ba[language^=fr]/ba[ext=m4a]/ba[acodec^=mp4a]/ba/b");
+        let explicit = french(Selection { format_id: "137+140".into(), extension: "mp4".into(), ..Default::default() });
+        assert_eq!(format_arguments(&explicit)[1], "137+ba[language^=fr]/137+140");
+        let whole = Selection { sponsorblock: true, chapters: true, ..Selection::preset(None, false) };
+        assert_eq!(extra_arguments(&whole), ["--sponsorblock-remove", "sponsor,selfpromo,interaction", "--embed-chapters"]);
+        assert!(extra_arguments(&Selection { clip_start: Some(1.0), clip_end: Some(5.0), ..whole }).is_empty(), "not for clips");
         let pair = Selection { format_id: "137+140".into(), extension: "m4a".into(), ..Default::default() };
         assert_eq!(format_arguments(&pair), ["--format", "137+140", "--merge-output-format", "mp4"]);
     }

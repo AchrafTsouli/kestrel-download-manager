@@ -198,8 +198,16 @@ fn video_probe(manager: &Manager, request: &PendingRequest, selection: &kestrel_
 }
 
 pub fn run() {
+    // A portable copy keeps the window's browser data in its own data folder too, so nothing is
+    // left in %LOCALAPPDATA% (WebView2 reads this variable; set before any thread or window starts).
+    if kestrel_store::is_portable() {
+        let webview = kestrel_store::default_directory().join("webview");
+        let _ = std::fs::create_dir_all(&webview);
+        // SAFETY: the first thing the program does, before any other thread exists.
+        unsafe { std::env::set_var("WEBVIEW2_USER_DATA_FOLDER", &webview) };
+    }
     // The app's identifier was com.achraftsouli.flux before the rename: its window data moves once.
-    if let Some(local) = std::env::var_os("LOCALAPPDATA").map(std::path::PathBuf::from) {
+    if let Some(local) = std::env::var_os("LOCALAPPDATA").map(std::path::PathBuf::from).filter(|_| !kestrel_store::is_portable()) {
         let (old, new) = (local.join("com.achraftsouli.flux"), local.join("com.achraftsouli.kestrel"));
         if !new.exists() && old.is_dir() {
             let _ = std::fs::rename(old, new);
@@ -301,7 +309,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::list_downloads, commands::get_download, commands::get_settings, commands::save_settings, commands::offer_url, commands::get_pending, commands::confirm_pending, commands::cancel_pending,
-            commands::probe_video, commands::video_exact_cut, commands::confirm_video, commands::video_as_file, commands::load_torrent, commands::confirm_torrent, commands::open_torrent_file, commands::check_updates, commands::install_update, commands::drag_item, commands::grab_site, commands::run_waiting, commands::register_browsers, commands::test_browsers, commands::set_after_complete, commands::get_after_complete, commands::open_with, commands::to_background, commands::crash_reports, commands::dismiss_crash, commands::report_crash, commands::open_log,
+            commands::probe_video, commands::video_exact_cut, commands::confirm_video, commands::video_as_file, commands::load_torrent, commands::confirm_torrent, commands::open_torrent_file, commands::check_updates, commands::install_update, commands::drag_item, commands::grab_site, commands::run_waiting, commands::register_browsers, commands::test_browsers, commands::set_after_complete, commands::get_after_complete, commands::open_with, commands::to_background, commands::crash_reports, commands::dismiss_crash, commands::report_crash, commands::open_log, commands::refresh_address, commands::rename_with_pattern, commands::file_checksum, commands::export_settings, commands::import_settings,
             commands::add_downloads, commands::pause_downloads, commands::resume_downloads, commands::pause_all, commands::resume_all, commands::remove_downloads, commands::remove_completed,
             commands::rename_download, commands::redownload, commands::zip_preview, commands::extension_setup, commands::open_extensions_page, commands::file_icon, commands::pending_icon, commands::type_icon, commands::move_in_queue, commands::write_link_list, commands::read_link_list, commands::set_speed_limit, commands::set_queue, commands::enqueue, commands::start_queue, commands::stop_queue, commands::running_queues,
             commands::open_file, commands::show_in_folder, commands::open_folder, commands::show_progress, commands::show_window, commands::power_action, commands::exit_app, commands::app_version

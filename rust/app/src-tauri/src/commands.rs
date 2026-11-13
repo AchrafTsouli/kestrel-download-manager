@@ -25,8 +25,9 @@ pub(crate) fn save_settings(app: AppHandle, manager: Mgr, settings: Settings) ->
 #[tauri::command]
 pub(crate) async fn offer_url(app: AppHandle, url: String, file_name: Option<String>, login: Option<String>, password: Option<String>) -> Result<Option<String>, String> {
     let url = url.trim().to_string();
-    if !(url.starts_with("http://") || url.starts_with("https://") || kestrel_torrent::magnet_hash(&url).is_some()) {
-        return Err("Enter a full address starting with http:// or https://, or a magnet link.".into());
+    let lower = url.to_ascii_lowercase();
+    if !(["http://", "https://", "ftp://", "ftps://", "sftp://"].iter().any(|p| lower.starts_with(p)) || kestrel_torrent::magnet_hash(&url).is_some()) {
+        return Err("Enter a full address starting with http://, https://, ftp:// or sftp://, or a magnet link.".into());
     }
     // "Use authorization": the login goes with this download only, as HTTP Basic authentication.
     let session = match login.filter(|l| !l.is_empty()) {
@@ -65,7 +66,11 @@ pub(crate) async fn type_icon(name: String) -> Result<Option<String>, String> {
 /// "Add the browser extension": the browsers found, their extensions page, the extension folder.
 #[tauri::command]
 pub(crate) fn extension_setup() -> serde_json::Value {
-    serde_json::json!({ "browsers": browsers::installed(), "folder": browsers::extension_folder().map(|p| p.to_string_lossy().into_owned()) })
+    serde_json::json!({
+        "browsers": browsers::installed(),
+        "folder": browsers::extension_folder().map(|p| p.to_string_lossy().into_owned()),
+        "firefoxManifest": browsers::firefox_extension_folder().map(|p| p.join("manifest.json").to_string_lossy().into_owned()),
+    })
 }
 #[tauri::command]
 pub(crate) fn open_extensions_page(browser: String) -> Result<(), String> {
@@ -121,6 +126,9 @@ pub(crate) struct StartChoice {
     /// Remember the folder for this category (1.x's "Remember this path").
     #[serde(default)]
     remember: bool,
+    /// The SHA-256 the site publishes: the finished file is checked against it.
+    #[serde(default)]
+    sha256: Option<String>,
 }
 #[tauri::command]
 pub(crate) async fn confirm_pending(app: AppHandle, manager: Mgr<'_>, windows: State<'_, Windows>, choice: StartChoice) -> Result<String, String> {
@@ -143,6 +151,7 @@ pub(crate) async fn confirm_pending(app: AppHandle, manager: Mgr<'_>, windows: S
         request_id: pending.request.request_id,
         total: pending.probe.and_then(|p| p.total),
         video: pending.request.video,
+        expected_sha256: choice.sha256.map(|s| s.trim().to_ascii_lowercase()).filter(|s| !s.is_empty()),
         ..Default::default()
     })?;
     windows.pending.lock().remove(&choice.pending_id);
@@ -196,8 +205,21 @@ pub(crate) struct VideoChoice {
     subfolder: bool,
     /// Subtitle languages ("en,fr"), saved beside the video.
     subtitles: Option<String>,
+    /// The audio track's language, SponsorBlock, chapters.
+    audio_language: Option<String>,
+    #[serde(default)]
+    sponsorblock: bool,
+    #[serde(default)]
+    chapters: bool,
     /// "now" or "later"
     start: String,
+}
+impl VideoChoice {
+    fn apply(&self, selection: &mut kestrel_media::Selection) {
+        selection.audio_language = self.audio_language.clone().map(|l| l.trim().to_string()).filter(|l| !l.is_empty());
+        selection.sponsorblock = self.sponsorblock;
+        selection.chapters = self.chapters && !selection.audio_only;
+    }
 }
 pub(crate) fn clock_name(seconds: f64) -> String {
     let s = seconds.max(0.0) as u64;
@@ -210,6 +232,7 @@ pub(crate) async fn confirm_video(app: AppHandle, manager: Mgr<'_>, windows: Sta
     if let Some(playlist) = found.playlist {
         let mut preset = kestrel_media::Selection::preset(choice.max_height, choice.audio_only);
         preset.subtitles = choice.subtitles.clone().filter(|_| !choice.audio_only);
+        choice.apply(&mut preset);
         let category = if choice.audio_only { "Music" } else { "Video" };
         let mut folder = manager.folder_for(category);
         if choice.subfolder {
@@ -245,12 +268,13 @@ pub(crate) async fn confirm_video(app: AppHandle, manager: Mgr<'_>, windows: Sta
         };
     }
     let catalog = found.catalog.ok_or("No video qualities were found.")?;
-    let format_id = choice.format_id.ok_or("Choose a quality.")?;
+    let format_id = choice.format_id.clone().ok_or("Choose a quality.")?;
     let mut selection = catalog.formats.iter().find(|f| f.format_id == format_id).cloned().ok_or("This quality is no longer available. Reload the quality list.")?;
     selection.clip_start = choice.clip_start.filter(|s| *s > 0.0);
     selection.clip_end = choice.clip_end;
     selection.clip_exact = choice.clip_exact && selection.is_clip();
     selection.subtitles = choice.subtitles.clone().filter(|_| !selection.audio_only && !selection.is_clip());
+    choice.apply(&mut selection);
     selection.validate(&pending.request.url)?;
     let part = if selection.is_clip() { format!(" (part {}-{})", clock_name(selection.clip_start.unwrap_or(0.0)), selection.clip_end.map_or("end".to_string(), clock_name)) } else { String::new() };
     let name = kestrel_engine::sanitize_file_name(&format!("{}{part} ({}).{}", catalog.title, selection.quality(), selection.extension));
@@ -315,7 +339,7 @@ pub(crate) async fn confirm_torrent(app: AppHandle, manager: Mgr<'_>, windows: S
         info_hash: info.info_hash.clone(),
         name: info.name.clone(),
         metadata_file: kestrel_torrent::metadata_path(&manager.torrents.cache, &info.info_hash),
-        // Every file chosen: no list, so aria2 takes the whole torrent.
+        // Every file chosen: no list, so the whole torrent is taken.
         files: if chosen.len() == info.files.len() { Vec::new() } else { chosen.iter().map(|f| f.index).collect() },
         selected_bytes: chosen.iter().map(|f| f.length).sum(),
         seed_minutes: choice.seed_minutes.min(1440),
@@ -363,7 +387,7 @@ pub(crate) fn read_link_list(path: String) -> Result<Vec<String>, String> {
 pub(crate) fn links_in(text: &str) -> Vec<String> {
     let mut seen = std::collections::HashSet::new();
     text.split_whitespace()
-        .filter(|w| { let l = w.to_ascii_lowercase(); l.starts_with("http://") || l.starts_with("https://") || l.starts_with("magnet:?") })
+        .filter(|w| { let l = w.to_ascii_lowercase(); ["http://", "https://", "ftp://", "ftps://", "sftp://", "magnet:?"].iter().any(|p| l.starts_with(p)) })
         .filter(|w| seen.insert(w.to_string()))
         .map(str::to_string)
         .collect()
@@ -622,4 +646,92 @@ pub(crate) fn open_with(manager: Mgr, id: String) -> Result<(), String> {
 #[tauri::command]
 pub(crate) fn app_version(app: AppHandle) -> String {
     app.package_info().version.to_string()
+}
+/// Context menu > Refresh address.
+#[tauri::command]
+pub(crate) async fn refresh_address(manager: Mgr<'_>, id: String, url: String) -> Result<(), String> {
+    manager.inner().clone().refresh_address(&id, &url).await
+}
+/// Several downloads renamed with a pattern ({name} {ext} {n} {date} {site}).
+#[tauri::command]
+pub(crate) fn rename_with_pattern(manager: Mgr, ids: Vec<String>, pattern: String) -> Vec<Result<String, String>> {
+    if pattern.trim().is_empty() {
+        return vec![Err("Write a name pattern.".into())];
+    }
+    manager.rename_many(&ids, pattern.trim())
+}
+/// The finished file's checksum ("md5", "sha1" or "sha256"), lowercase hex.
+#[tauri::command]
+pub(crate) async fn file_checksum(manager: Mgr<'_>, id: String, algorithm: String) -> Result<String, String> {
+    let record = manager.record(&id).ok_or("Unknown download.")?;
+    if record.status != model::Status::Completed || !record.destination.is_file() {
+        return Err("The file is not there (not finished, moved or deleted).".into());
+    }
+    tokio::task::spawn_blocking(move || checksum_of(&record.destination, &algorithm)).await.map_err(|e| e.to_string())?
+}
+pub(crate) fn checksum_of(path: &std::path::Path, algorithm: &str) -> Result<String, String> {
+    use sha2::Digest;
+    use std::io::Read;
+    fn run<D: sha2::Digest>(mut digest: D, path: &std::path::Path) -> Result<String, String> {
+        let mut file = std::fs::File::open(path).map_err(|e| e.to_string())?;
+        let mut buffer = vec![0u8; 1 << 20];
+        loop {
+            let n = file.read(&mut buffer).map_err(|e| e.to_string())?;
+            if n == 0 { break; }
+            digest.update(&buffer[..n]);
+        }
+        Ok(digest.finalize().iter().map(|b| format!("{b:02x}")).collect())
+    }
+    match algorithm {
+        "md5" => run(md5::Md5::new(), path),
+        "sha1" => run(sha1::Sha1::new(), path),
+        "sha256" => run(sha2::Sha256::new(), path),
+        _ => Err("Unknown checksum type.".into()),
+    }
+}
+/// File > Export settings: everything except passwords.
+#[tauri::command]
+pub(crate) fn export_settings(manager: Mgr, path: String) -> Result<(), String> {
+    let settings = manager.settings.read().for_export();
+    let json = serde_json::json!({ "kestrelSettings": 1, "settings": settings });
+    std::fs::write(&path, serde_json::to_string_pretty(&json).map_err(|e| e.to_string())?).map_err(|e| e.to_string())
+}
+/// File > Import settings. Passwords are not in exports: the ones saved here are kept.
+#[tauri::command]
+pub(crate) fn import_settings(app: AppHandle, manager: Mgr, path: String) -> Result<(), String> {
+    let text = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
+    let value: serde_json::Value = serde_json::from_str(&text).map_err(|_| "This is not a Kestrel settings file.".to_string())?;
+    if value.get("kestrelSettings").is_none() {
+        return Err("This is not a Kestrel settings file.".into());
+    }
+    let mut imported: Settings = serde_json::from_value(value["settings"].clone()).map_err(|e| format!("The settings file is damaged: {e}"))?;
+    let current = manager.settings.read().clone();
+    if imported.proxy_password.is_empty() && imported.proxy == current.proxy {
+        imported.proxy_password = current.proxy_password.clone();
+    }
+    for login in &mut imported.site_logins {
+        if login.password.is_empty()
+            && let Some(saved) = current.site_logins.iter().find(|l| l.origin == login.origin && l.username == login.username) {
+                login.password = saved.password.clone();
+            }
+    }
+    imported.last_update_check_ms = current.last_update_check_ms;
+    imported.extension_guide_shown = current.extension_guide_shown;
+    system::set_autostart(imported.start_with_windows);
+    manager.save_settings(imported)?;
+    let _ = app.emit("message", "Settings imported.");
+    Ok(())
+}
+
+#[cfg(test)]
+mod checksum_tests {
+    #[test]
+    fn known_checksums() {
+        let path = std::env::temp_dir().join(format!("kestrel-sum-{}", std::process::id()));
+        std::fs::write(&path, b"abc").unwrap();
+        assert_eq!(super::checksum_of(&path, "md5").unwrap(), "900150983cd24fb0d6963f7d28e17f72");
+        assert_eq!(super::checksum_of(&path, "sha1").unwrap(), "a9993e364706816aba3e25717850c26c9cd0d89d");
+        assert_eq!(super::checksum_of(&path, "sha256").unwrap(), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+        let _ = std::fs::remove_file(path);
+    }
 }

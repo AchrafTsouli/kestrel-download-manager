@@ -32,6 +32,7 @@ use tokio_util::sync::CancellationToken;
 use url::Url;
 
 mod page;
+pub mod remote;
 pub use error::{Error, ErrorKind, Result};
 pub use limits::{HostLimits, Limiter};
 pub use plan::{Plan, Segment};
@@ -66,6 +67,8 @@ pub struct Options {
     pub headers_timeout: Duration,
     pub read_timeout: Duration,
     pub checkpoint_every: Duration,
+    /// SFTP server keys seen before (OpenSSH "accept-new"); none = not remembered.
+    pub known_hosts: Option<PathBuf>,
 }
 
 impl Default for Options {
@@ -81,6 +84,7 @@ impl Default for Options {
             // A connection that stays silent this long is dropped and its part handed on.
             read_timeout: Duration::from_secs(20),
             checkpoint_every: Duration::from_secs(2),
+            known_hosts: None,
         }
     }
 }
@@ -285,6 +289,9 @@ impl Engine {
     /// Size, range support, validators and name. Tries a one-byte range, then a plain request, then the
     /// form of a browser navigation (some sites accept only that); keeps whichever the site accepted.
     pub async fn probe(&self, job: &mut Job) -> Result<Probed> {
+        if remote::is_remote(&job.url) {
+            return remote::probe(job, self.options.known_hosts.clone()).await;
+        }
         if let Some(session) = &job.session {
             session.validate(&job.url)?;
         }
@@ -413,6 +420,9 @@ impl Engine {
     }
 
     async fn attempt(&self, job: &mut Job, events: Events, cancel: CancellationToken) -> Result<Outcome> {
+        if remote::is_remote(&job.url) {
+            return remote::download(job, &*events, cancel, self.options.known_hosts.clone(), &self.global_limiter).await;
+        }
         let probed = self.probe(job).await?;
         events(Event::Probed(probed.clone()));
         let total = job.resume.total;
@@ -451,24 +461,7 @@ impl Engine {
         }
         part.sync().map_err(Error::storage)?;
         drop(part);
-        let part_path = file::part_path(&job.destination);
-        let sha256 = match &job.expected_sha256 {
-            Some(expected) => {
-                let path = part_path.clone();
-                let actual = tokio::task::spawn_blocking(move || hash_file(&path)).await.map_err(|e| Error::protocol(e.to_string()))?.map_err(Error::storage)?;
-                if !actual.eq_ignore_ascii_case(expected) {
-                    return Err(Error::new(ErrorKind::Integrity, "The file does not match the expected SHA-256 checksum."));
-                }
-                Some(actual)
-            }
-            None => None,
-        };
-        if job.destination.exists() {
-            return Err(Error::new(ErrorKind::Storage, "A file with this name already exists; choose another name."));
-        }
-        std::fs::rename(&part_path, &job.destination).map_err(Error::storage)?;
-        events(Event::Checkpoint(job.resume.clone()));
-        Ok(Outcome::Completed { path: job.destination.clone(), bytes: total, sha256 })
+        finish_file(job, &*events, total).await
     }
 
     async fn run_workers(&self, job: &mut Job, part: &file::PartFile, connections: usize, events: Events, cancel: CancellationToken) -> Result<()> {
@@ -810,6 +803,28 @@ async fn read_some(mut response: reqwest::Response, max: usize) -> Vec<u8> {
     }
     body.truncate(max);
     body
+}
+
+/// The end of every download: checked against the expected SHA-256, renamed into place.
+pub(crate) async fn finish_file(job: &mut Job, events: &(dyn Fn(Event) + Send + Sync), total: u64) -> Result<Outcome> {
+    let part_path = file::part_path(&job.destination);
+    let sha256 = match &job.expected_sha256 {
+        Some(expected) => {
+            let path = part_path.clone();
+            let actual = tokio::task::spawn_blocking(move || hash_file(&path)).await.map_err(|e| Error::protocol(e.to_string()))?.map_err(Error::storage)?;
+            if !actual.eq_ignore_ascii_case(expected) {
+                return Err(Error::new(ErrorKind::Integrity, "The file does not match the expected SHA-256 checksum."));
+            }
+            Some(actual)
+        }
+        None => None,
+    };
+    if job.destination.exists() {
+        return Err(Error::new(ErrorKind::Storage, "A file with this name already exists; choose another name."));
+    }
+    std::fs::rename(&part_path, &job.destination).map_err(Error::storage)?;
+    events(Event::Checkpoint(job.resume.clone()));
+    Ok(Outcome::Completed { path: job.destination.clone(), bytes: total, sha256 })
 }
 
 #[cfg(test)]

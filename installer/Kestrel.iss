@@ -7,7 +7,7 @@
   #define OutputDir "..\installers"
 #endif
 #ifndef AppVersion
-  #define AppVersion "2.0.1"
+  #define AppVersion "2.1.0"
 #endif
 #ifndef ExtensionId
   #error ExtensionId must match the packaged browser extension key
@@ -70,6 +70,9 @@ french.UninstallAppRunningError=Kestrel est encore ouvert, peut-être dans la zo
 Source: "{#PayloadDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [InstallDelete]
+; Kestrel 2.1 runs torrents itself (librqbit): aria2 is no longer installed.
+Type: files; Name: "{app}\video-tools\aria2c.exe"
+Type: files; Name: "{app}\licenses\aria2*"
 ; Upgrades from Flux 1.x: its .NET runtime files are no longer used.
 Type: files; Name: "{app}\D3DCompiler_47_cor3.dll"
 Type: files; Name: "{app}\PenImc_cor3.dll"

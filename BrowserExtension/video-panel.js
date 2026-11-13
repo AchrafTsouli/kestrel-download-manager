@@ -44,13 +44,15 @@
     return performance.getEntriesByType('resource').slice(-300).map(entry => ({url:entry.name})).filter(item => ApexMedia.candidate(item.url)).slice(-32);
   }
   const sizeText = size => !size ? 'Size unknown' : size >= 1073741824 ? `${(size / 1073741824).toFixed(2)} GB` : `${(size / 1048576).toFixed(2)} MB`;
+  // Fixed markup only (never page data), parsed rather than assigned as HTML.
+  const nodes = markup => { const d = new DOMParser().parseFromString(markup, 'text/html'); return [...d.head.childNodes, ...d.body.childNodes]; };
   function makePanel(video) {
     const host = document.createElement('div');
     host.setAttribute('data-apex-video-panel', '1.1.1');
     host.style.cssText = 'all:initial!important;position:fixed!important;z-index:2147483647!important;display:none!important;';
     const root = host.attachShadow({ mode: 'closed' });
     const ARROW = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11m0 0-4.5-4.5M12 15l4.5-4.5M5 19.5h14"/></svg>';
-    root.innerHTML = `<style>
+    root.append(...nodes(`<style>
       :host{color-scheme:dark}*{box-sizing:border-box}
       .panel{display:flex;flex-direction:column;align-items:flex-end;font:12.5px/1.4 "Segoe UI",system-ui,Arial,sans-serif;color:#dde7f0;direction:ltr;text-align:left;-webkit-font-smoothing:antialiased}
       button{font:inherit;color:inherit;cursor:pointer;margin:0}button:focus-visible{outline:2px solid #7dd3fc;outline-offset:2px}button:disabled{opacity:.55;cursor:wait}
@@ -88,7 +90,7 @@
       .status{padding:7px 6px 2px;color:#c4d1dd;font-size:11.5px}.status:empty{display:none}
       .note{display:flex;align-items:center;gap:6px;margin-top:6px;padding:7px 6px 1px;border-top:1px solid #1f2a36;color:#6b7f93;font-size:10.5px;letter-spacing:.2px}
       .note b{color:#8496a8;font-weight:700;letter-spacing:.6px}
-    </style><div class="panel"><div class="bar"><button class="trigger" aria-expanded="false" aria-haspopup="true">${ARROW}<span>Download this video</span><svg class="chev" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></button><button class="close" aria-label="Hide video download panel" title="Hide for this video">×</button></div><div class="menu" hidden><div class="top"><span class="mark">${ARROW}</span><div class="titles"><div class="heading"></div><div class="site"></div></div></div><button class="all">${ARROW}Download all sources</button><button class="load all" hidden>Load available qualities</button><div class="list"></div><div class="status" role="status" aria-live="polite"></div><div class="note"><b>KESTREL</b> · audio is included in every quality</div></div></div>`;
+    </style><div class="panel"><div class="bar"><button class="trigger" aria-expanded="false" aria-haspopup="true">${ARROW}<span>Download this video</span><svg class="chev" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></button><button class="close" aria-label="Hide video download panel" title="Hide for this video">×</button></div><div class="menu" hidden><div class="top"><span class="mark">${ARROW}</span><div class="titles"><div class="heading"></div><div class="site"></div></div></div><button class="all">${ARROW}Download all sources</button><button class="load all" hidden>Load available qualities</button><div class="list"></div><div class="status" role="status" aria-live="polite"></div><div class="note"><b>KESTREL</b> · audio is included in every quality</div></div></div>`));
     const select = selector => root.querySelector(selector);
     const panel = { video, host, root, items: [], signature: '', busy: false, loading: false, catalog: null, page: null, dismissed: false, source: video.currentSrc || video.src };
     const bar = select('.bar');
@@ -117,7 +119,7 @@
         const meta = document.createElement('span'); meta.className = 'meta'; meta.textContent = [item.format?.toUpperCase(), where].filter(Boolean).join(' · ') || `Source ${index + 1}`;
         info.append(label, meta);
         const amount = document.createElement('span'); amount.className = 'size'; amount.textContent = item.size ? `${item.approximate ? '≈ ' : ''}${sizeText(item.size)}` : '';
-        const get = document.createElement('span'); get.className = 'get'; get.innerHTML = ARROW;
+        const get = document.createElement('span'); get.className = 'get'; get.append(...nodes(ARROW));
         button.title = `Download ${text}`;
         button.append(badge, info, amount, get); button.addEventListener('click', () => download([item])); list.append(button);
       }

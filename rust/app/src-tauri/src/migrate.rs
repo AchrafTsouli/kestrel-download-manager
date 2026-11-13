@@ -95,6 +95,7 @@ pub fn settings(v1: &Value) -> Settings {
             queue: text(r, "Queue").map(|q| queue_name(&q)).unwrap_or_default(),
             connections: number(r, "Connections").map(|n| n as usize),
             speed_limit: number(r, "SpeedLimitBytes"),
+            user_agent: String::new(),
         }).collect();
     }
     if let Some(queues) = v1.get("Queues").and_then(Value::as_array) {

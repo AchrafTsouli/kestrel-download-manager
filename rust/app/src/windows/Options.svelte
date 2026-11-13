@@ -11,6 +11,7 @@
   let error = $state("");
   let saved = $state("");
   let limitKb = $state(0);
+  let nightKb = $state(0);
   let bridgeNote = $state("");
   let checks: { browser: string; ok: boolean; detail: string }[] = $state([]);
   let newHost = $state("");
@@ -25,7 +26,7 @@
   const soundNames = ["Download complete", "Download failed", "Queue processing started", "Queue processing stopped/finished"];
   const keys = ["Alt", "Ctrl", "Shift", "None"];
 
-  onMount(() => { call<Settings>("get_settings").then((v) => { s = v; limitKb = Math.round(v.speedLimit / 1024); applyTheme(v.theme); }); });
+  onMount(() => { call<Settings>("get_settings").then((v) => { s = v; limitKb = Math.round(v.speedLimit / 1024); nightKb = Math.round(v.nightLimit / 1024); applyTheme(v.theme); }); });
   async function browse() {
     const chosen = await pickFolder({ directory: true, defaultPath: s?.downloadDir, title: "Download folder" });
     if (typeof chosen === "string" && s) s.downloadDir = chosen;
@@ -47,7 +48,7 @@
     if (!s) return;
     error = ""; saved = "";
     try {
-      await call("save_settings", { settings: { ...s, speedLimit: Math.max(0, limitKb) * 1024, connections: Number(s.connections), maxRetries: Number(s.maxRetries), interfaceSize: Number(s.interfaceSize), firstDay: Number(s.firstDay), duplicateAction: Number(s.duplicateAction), archiveTarget: Number(s.archiveTarget), proxyMode: Number(s.proxyMode) } });
+      await call("save_settings", { settings: { ...s, speedLimit: Math.max(0, limitKb) * 1024, nightLimit: Math.max(0, Number(nightKb)) * 1024, connections: Number(s.connections), maxRetries: Number(s.maxRetries), interfaceSize: Number(s.interfaceSize), firstDay: Number(s.firstDay), duplicateAction: Number(s.duplicateAction), archiveTarget: Number(s.archiveTarget), proxyMode: Number(s.proxyMode) } });
       applyTheme(s.theme);
       if (close) win.close(); else saved = "Options saved.";
     } catch (e) { error = String(e); }
@@ -178,6 +179,17 @@
             </div>
           </fieldset>
           <fieldset class="group">
+            <legend>Night mode</legend>
+            <label class="check"><input type="checkbox" bind:checked={s.nightMode} /> Use another speed limit at night</label>
+            <div class="line indent">
+              <span class="muted">From</span><input class="input time" type="time" bind:value={s.nightStart} disabled={!s.nightMode} aria-label="Night starts" />
+              <span class="muted">to</span><input class="input time" type="time" bind:value={s.nightEnd} disabled={!s.nightMode} aria-label="Night ends" />
+              <input class="input num" type="number" min="0" bind:value={nightKb} disabled={!s.nightMode} aria-label="Night speed limit" />
+              <span class="muted">KB/s (0 = no limit)</span>
+            </div>
+            <p class="note">For example, full speed at night and a gentle limit by day: set the limit above for the day and 0 here.</p>
+          </fieldset>
+          <fieldset class="group">
             <legend>Exceptions: servers that allow fewer connections</legend>
             <div class="table">
               {#each limits as [host, n]}
@@ -262,10 +274,11 @@
                 <select id="rn{i}" class="input short" bind:value={rule.connections}><option value={null}>default</option>{#each [1, 2, 4, 8, 16, 32] as n}<option value={n}>{n}</option>{/each}</select>
                 <label for="rl{i}">speed limit</label>
                 <div class="row"><input id="rl{i}" class="input short" type="number" min="0" value={rule.speedLimit ? Math.round(rule.speedLimit / 1024) : ""} placeholder="none" oninput={(e) => { const kb = Number((e.currentTarget as HTMLInputElement).value); rule.speedLimit = kb > 0 ? kb * 1024 : null; }} /> <span class="muted">KB/s</span></div>
+                <label for="ru{i}">User-Agent</label><input id="ru{i}" class="input" bind:value={rule.userAgent} placeholder="the usual one" spellcheck="false" />
               </div>
             </fieldset>
           {/each}
-          <div><button class="btn" onclick={() => { s!.rules = [...s!.rules, { name: "New rule", enabled: true, domain: "", extensions: "", urlPattern: "", folder: "", category: "", queue: "", connections: null, speedLimit: null }]; }}>Add a rule</button></div>
+          <div><button class="btn" onclick={() => { s!.rules = [...s!.rules, { name: "New rule", enabled: true, domain: "", extensions: "", urlPattern: "", folder: "", category: "", queue: "", connections: null, speedLimit: null, userAgent: "" }]; }}>Add a rule</button></div>
         {:else if tab === "Sounds"}
           <fieldset class="group">
             <legend>Select sounds for Kestrel events</legend>
@@ -302,6 +315,12 @@
             <label class="check indent"><input type="radio" name="at" value={1} bind:group={s.archiveTarget} disabled={!s.extractArchives} /> Always into a folder named after it</label>
             <label class="check indent"><input type="radio" name="at" value={2} bind:group={s.archiveTarget} disabled={!s.extractArchives} /> Straight into the archive's folder</label>
           </fieldset>
+          <fieldset class="group">
+            <legend>Archive passwords</legend>
+            <label class="muted" for="apw">Passwords to try on protected archives, one per line:</label>
+            <textarea id="apw" class="input" rows="4" bind:value={s.archivePasswords} spellcheck="false" disabled={!s.extractArchives}></textarea>
+            <p class="note">Saved encrypted for your Windows account.</p>
+          </fieldset>
         {/if}
       </div>
       {#if error}<p class="error-text">{error}</p>{/if}
@@ -328,6 +347,7 @@
   .short { width: 110px; flex: none !important; }
   .key { width: 80px; flex: none !important; }
   .num { width: 70px; flex: none !important; }
+  .time { width: 100px; flex: none !important; }
   .small { min-width: 0; height: 24px; }
   .table { display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: 3px; background: var(--bg); }
   .trow { display: grid; grid-template-columns: 24px 140px 1fr; gap: 8px; align-items: center; padding: 4px 8px; border-bottom: 1px solid color-mix(in srgb, var(--line) 50%, transparent); }

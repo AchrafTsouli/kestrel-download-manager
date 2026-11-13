@@ -81,7 +81,8 @@ impl Manager {
         self.emit(id);
         let archive = path.to_path_buf();
         let name = archive.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-        let message = match tokio::task::spawn_blocking(move || crate::extract::extract(&archive, target)).await {
+        let passwords: Vec<String> = self.settings.read().archive_passwords.lines().map(str::to_string).collect();
+        let message = match tokio::task::spawn_blocking(move || crate::extract::extract(&archive, target, &passwords)).await {
             Ok(Ok((folder, what))) => {
                 if delete {
                     crate::extract::recycle(path);

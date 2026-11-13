@@ -18,7 +18,7 @@ use crate::model::{Kind, LiveInfo, MAIN_QUEUE, Record, Settings, Status, View, c
 mod actions;
 mod add;
 mod media;
-use media::{aria2_path, video_tools_directory};
+use media::video_tools_directory;
 mod rules;
 
 pub fn now_ms() -> u64 {
@@ -118,13 +118,13 @@ impl Manager {
         let limits = HostLimits::new(settings.host_limits.clone()).on_learned(move |host, limit| {
             let _ = app_for_limits.emit("host-limit", (host.to_string(), limit));
         });
-        let engine = Engine::new(Options { max_retries: settings.max_retries, ..Options::default() }, limits);
-        engine.global_limiter.set_rate(settings.speed_limit);
+        let engine = Engine::new(Options { max_retries: settings.max_retries, known_hosts: Some(data_dir.join("known_hosts")), ..Options::default() }, limits);
+        engine.global_limiter.set_rate(settings.speed_limit_at(&crate::system::local_time().1));
         let manager = Arc::new(Manager {
             app,
             engine,
             media: kestrel_media::Tools::new(video_tools_directory(), kestrel_store::default_directory().join("tools")),
-            torrents: kestrel_torrent::Tools::new(aria2_path(), kestrel_store::default_directory().join("torrents")),
+            torrents: kestrel_torrent::Tools::new(kestrel_store::default_directory().join("torrents")),
             store: Mutex::new(store),
             settings: RwLock::new(settings),
             records: Mutex::new(records),
@@ -232,7 +232,7 @@ impl Manager {
                 let _ = self.app.emit("message", format!("Could not save the download list: {error}"));
             }
     }
-    /// Proxy and browser identity for the engine, yt-dlp and aria2.
+    /// Proxy and browser identity for the engine, yt-dlp and torrents.
     fn apply_network(&self, settings: &Settings) -> Result<(), String> {
         let proxy = (settings.proxy_mode == 2 && !settings.proxy.trim().is_empty()).then(|| kestrel_engine::Proxy {
             url: settings.proxy.trim().to_string(),
@@ -260,7 +260,7 @@ impl Manager {
         if settings.speed_limit > 0 {
             settings.last_speed_limit = settings.speed_limit;
         }
-        self.engine.global_limiter.set_rate(settings.speed_limit);
+        self.engine.global_limiter.set_rate(settings.speed_limit_at(&crate::system::local_time().1));
         self.store.lock().set("settings", &settings).map_err(|e| e.to_string())?;
         *self.settings.write() = settings.clone();
         let _ = self.app.emit("settings", settings);
@@ -452,6 +452,13 @@ impl Manager {
         self.check_queues_done();
     }
 
+    /// Night mode: the scheduler calls this every few seconds so the limit follows the clock.
+    pub fn apply_speed_schedule(&self) {
+        let limit = self.settings.read().speed_limit_at(&crate::system::local_time().1);
+        if self.engine.global_limiter.rate() != limit {
+            self.engine.global_limiter.set_rate(limit);
+        }
+    }
     pub fn shutdown(&self) {
         // Every other record was saved when it changed: only the running ones and unsaved checkpoints remain.
         let running: Vec<String> = {

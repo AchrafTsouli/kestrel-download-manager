@@ -36,11 +36,12 @@ export type Settings = {
   categoryDirs: Record<string, string>; confirmDelete: boolean; interfaceSize: number; bypassKey: string; forceKey: string; excludedAddresses: string;
   setCreationDate: boolean; onlyAddToQueue: boolean; duplicateAction: number; sounds: { on: boolean; file: string }[];
   dateOrder: string; clock: string; firstDay: number; archiveTarget: number; proxyMode: number;
+  nightMode: boolean; nightStart: string; nightEnd: string; nightLimit: number; archivePasswords: string;
 };
 export type SiteLogin = { enabled: boolean; origin: string; username: string; password: string };
 export type Rule = {
   name: string; enabled: boolean; domain: string; extensions: string; urlPattern: string;
-  folder: string; category: string; queue: string; connections: number | null; speedLimit: number | null;
+  folder: string; category: string; queue: string; connections: number | null; speedLimit: number | null; userAgent: string;
 };
 export type Probe = { finalUrl?: string | null; url: string; fileName: string; total: number | null; resumable: boolean; contentType: string | null; category: string; folder: string; error: string | null };
 

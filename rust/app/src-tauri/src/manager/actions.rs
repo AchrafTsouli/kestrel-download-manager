@@ -136,6 +136,7 @@ impl Manager {
                     if torrent && record.destination.is_dir() { let _ = std::fs::remove_dir_all(&record.destination); } else { let _ = std::fs::remove_file(&record.destination); }
                 }
                 if torrent && (record.status != Status::Completed || delete_files) {
+                    // Left by aria2, which ran torrents before Kestrel 2.1.
                     let mut control = record.destination.clone().into_os_string();
                     control.push(".aria2");
                     let _ = std::fs::remove_file(control);
@@ -153,6 +154,67 @@ impl Manager {
         let ids: Vec<String> = self.records.lock().iter().filter(|r| r.status == Status::Completed).map(|r| r.id.clone()).collect();
         self.remove(&ids, false)
     }
+    /// "Refresh address": an expired link replaced by a new one for the same file. The progress is
+    /// kept when the new address gives a file of the same size; otherwise nothing changes.
+    pub async fn refresh_address(self: &Arc<Self>, id: &str, address: &str) -> Result<(), String> {
+        let record = self.record(id).ok_or("Unknown download.")?;
+        if !matches!(record.kind, Kind::Http) {
+            return Err("Only a file download's address can be refreshed.".into());
+        }
+        if self.live.lock().contains_key(id) {
+            return Err("Stop the download before changing its address.".into());
+        }
+        let url = Url::parse(address.trim()).map_err(|_| "Enter a full address that starts with http:// or https://.")?;
+        if !matches!(url.scheme(), "http" | "https" | "ftp" | "ftps" | "sftp") {
+            return Err("Enter a full address that starts with http:// or https://.".into());
+        }
+        let mut job = Job::new(url.clone(), record.destination.clone());
+        job.session = self.with_login(&url, record.session.clone().filter(|s| kestrel_engine::session::origin_of(&url) == s.origin));
+        // The new address is a new server's copy: its validators are its own; the size must match.
+        job.resume = record.resume.clone();
+        job.resume.etag = None;
+        job.resume.last_modified = None;
+        let probed = self.engine.probe(&mut job).await.map_err(|e| e.message)?;
+        if let (Some(before), Some(now)) = (record.resume.total.or(record.total), probed.total)
+            && before != now {
+                return Err(format!("This address gives a different file ({} instead of {} bytes). Use Redownload to start it again.", now, before));
+            }
+        let kept = record.written > 0 && !job.resume.plan.segments.is_empty();
+        self.update(id, |r| {
+            r.url = url.to_string();
+            r.session = job.session.clone();
+            r.resume = job.resume.clone();
+            r.written = r.resume.written();
+            r.total = probed.total.or(r.total);
+            r.error = None;
+            if r.status == Status::Failed { r.status = Status::Paused; }
+        });
+        self.save(id);
+        self.emit(id);
+        crate::applog::info(format!("Download {id}: address refreshed ({})", if kept { "progress kept" } else { "starts again" }));
+        Ok(())
+    }
+
+    /// Renames several downloads with a pattern: {name} {ext} {n} {date} {site}.
+    pub fn rename_many(&self, ids: &[String], pattern: &str) -> Vec<Result<String, String>> {
+        let width = ids.len().to_string().len().max(2);
+        ids.iter().enumerate().map(|(i, id)| {
+            let record = self.record(id).ok_or_else(|| "Unknown download.".to_string())?;
+            let file = record.destination.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+            let path = Path::new(&file);
+            let stem = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+            let ext = path.extension().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+            let date = chrono::DateTime::from_timestamp_millis(record.added_ms as i64).map(|d| d.with_timezone(&chrono::Local).format("%Y-%m-%d").to_string()).unwrap_or_default();
+            let site = Url::parse(&record.url).ok().and_then(|u| u.host_str().map(|h| h.trim_start_matches("www.").to_string())).unwrap_or_default();
+            let mut name = pattern.replace("{name}", &stem).replace("{n}", &format!("{:0width$}", i + 1)).replace("{date}", &date).replace("{site}", &site).replace("{ext}", &ext);
+            // No extension in the pattern: the file keeps its own.
+            if !pattern.contains("{ext}") && !ext.is_empty() {
+                name = format!("{name}.{ext}");
+            }
+            self.rename(id, &name).map(|_| name)
+        }).collect()
+    }
+
     pub fn rename(&self, id: &str, name: &str) -> Result<(), String> {
         let record = self.record(id).ok_or("Unknown download.")?;
         if self.live.lock().contains_key(id) {

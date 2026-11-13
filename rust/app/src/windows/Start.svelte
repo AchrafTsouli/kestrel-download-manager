@@ -14,6 +14,8 @@
   let folder = $state("");
   let category = $state("Other");
   let description = $state("");
+  let sha256 = $state("");
+  const shaError = $derived(sha256.trim() && !/^[0-9a-fA-F]{64}$/.test(sha256.trim()) ? "A SHA-256 checksum is 64 characters (0-9, a-f)." : "");
   let queue = $state("Main download queue");
   let total: number | null = $state(null);
   let checking = $state(true);
@@ -98,7 +100,7 @@
   async function start(mode: "now" | "later" | "queue") {
     error = "";
     try {
-      await call("confirm_pending", { choice: { pendingId: id, fileName, folder, category, description, start: mode, queue, remember } });
+      await call("confirm_pending", { choice: { pendingId: id, fileName, folder, category, description, start: mode, queue, remember, sha256: sha256.trim() || null } });
       win.close();
     } catch (e) { error = String(e); }
   }
@@ -141,7 +143,10 @@
 
       <label for="desc">Description</label>
       <input id="desc" class="input wide" bind:value={description} />
+      <label for="sha">SHA-256</label>
+      <input id="sha" class="input wide" bind:value={sha256} placeholder="optional: the checksum the site publishes" spellcheck="false" />
     </div>
+    {#if shaError}<p class="error-text">{shaError}</p>{/if}
     {#if note}<p class="note">{note}</p>{/if}
     {#if error}<p class="error-text">{error}</p>{/if}
     {#if later}
@@ -154,7 +159,7 @@
     {:else}
       <div class="buttons">
         <button class="btn" onclick={() => (later = true)} disabled={!pending} title="Add it to a queue; it starts with the queue">Download Later</button>
-        <button class="btn go" onclick={() => start("now")} disabled={!pending || !fileName.trim()}>Start Download</button>
+        <button class="btn go" onclick={() => start("now")} disabled={!pending || !fileName.trim() || !!shaError}>Start Download</button>
         <button class="btn" onclick={cancel}>Cancel</button>
       </div>
     {/if}

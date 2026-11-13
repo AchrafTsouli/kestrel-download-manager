@@ -38,7 +38,7 @@ impl Manager {
         let mut name = suggested.filter(|s| !s.trim().is_empty()).map(|s| kestrel_engine::sanitize_file_name(&s)).unwrap_or(fallback);
         let mut probe = Probe { url: url.trim().to_string(), file_name: name.clone(), total: None, resumable: false, content_type: None, category: category_for(&name).into(), folder: String::new(), error: None, final_url: None };
         match parsed {
-            Ok(parsed) if matches!(parsed.scheme(), "http" | "https") => {
+            Ok(parsed) if matches!(parsed.scheme(), "http" | "https" | "ftp" | "ftps" | "sftp") => {
                 let mut job = Job::new(parsed, std::env::temp_dir().join("kestrel-probe"));
                 job.session = session;
                 match tokio::time::timeout(Duration::from_secs(20), self.engine.probe(&mut job)).await {
@@ -56,7 +56,7 @@ impl Manager {
                     Err(_) => probe.error = Some("The server did not answer in time; the size will be known when the download starts.".into()),
                 }
             }
-            _ => probe.error = Some("Enter a full address starting with http:// or https://.".into()),
+            _ => probe.error = Some("Enter a full address starting with http://, https://, ftp:// or sftp://.".into()),
         }
         probe.file_name = name.clone();
         probe.category = category_for(&name).into();
@@ -84,8 +84,21 @@ impl Manager {
             // Video jobs keep the page's normal form (one address per YouTube video).
             url = Url::parse(&kestrel_media::pages::canonicalize(url.as_str()).ok_or("Use a video page or an HLS/DASH stream address.")?).map_err(|e| e.to_string())?;
         }
-        if !matches!(url.scheme(), "http" | "https") || !url.username().is_empty() {
-            return Err("Only HTTP and HTTPS links without a user name in them are supported.".into());
+        // FTP and SFTP: a user name and password in the address move into the download's session,
+        // so the address shown in the list carries no password.
+        let mut request = request;
+        if matches!(url.scheme(), "ftp" | "ftps" | "sftp") && !url.username().is_empty() {
+            use base64::Engine as _;
+            let decode = |s: &str| percent_encoding::percent_decode_str(s).decode_utf8_lossy().into_owned();
+            let token = base64::engine::general_purpose::STANDARD.encode(format!("{}:{}", decode(url.username()), decode(url.password().unwrap_or(""))));
+            let _ = url.set_username("");
+            let _ = url.set_password(None);
+            let mut session = request.session.take().unwrap_or_else(|| Session::for_url(&url));
+            session.authorization = Some(format!("Basic {token}"));
+            request.session = Some(session);
+        }
+        if !matches!(url.scheme(), "http" | "https" | "ftp" | "ftps" | "sftp") || !url.username().is_empty() {
+            return Err("Only HTTP, HTTPS, FTP and SFTP links without a user name in them are supported.".into());
         }
         if let Some(request_id) = &request.request_id
             && let Some(existing) = self.records.lock().iter().find(|r| r.request_id.as_ref() == Some(request_id)) {
@@ -102,6 +115,15 @@ impl Manager {
             name = format!("{stem}.{}", selection.extension);
         }
         let rule = self.rule_for(&url, &name);
+        // A rule's own User-Agent for this site.
+        let session = match rule.as_ref().map(|r| r.user_agent.trim()).filter(|ua| !ua.is_empty() && !ua.chars().any(char::is_control)) {
+            Some(ua) => {
+                let mut s = session.unwrap_or_else(|| Session { origin: format!("{}/", url.origin().ascii_serialization()), ..Default::default() });
+                s.user_agent = Some(ua.to_string());
+                Some(s)
+            }
+            None => session,
+        };
         let rule_text = |pick: fn(&crate::model::Rule) -> &String| rule.as_ref().map(|r| pick(r).trim().to_string()).filter(|t| !t.is_empty());
         let category = request.category.clone().or_else(|| rule_text(|r| &r.category)).unwrap_or_else(|| match &request.video {
             Some(selection) if selection.audio_only => "Music".to_string(),
@@ -161,7 +183,7 @@ impl Manager {
         Ok(id)
     }
 
-    /// A torrent is saved under its own name in the chosen folder (aria2 continues there after a pause).
+    /// A torrent is saved under its own name in the chosen folder (it continues there after a pause).
     pub(super) fn add_torrent(self: &Arc<Self>, request: AddRequest, selection: kestrel_torrent::Selection) -> Result<String, String> {
         let url = kestrel_torrent::magnet(&selection.info_hash, &selection.name);
         selection.validate(&url)?;

@@ -15,12 +15,14 @@ pub struct Browser {
 
 /// Each browser: id, name, extensions page, where its program usually is (under these folders).
 type Known = (&'static str, &'static str, &'static str, &'static [(&'static str, &'static str)]);
-const KNOWN: [Known; 5] = [
+const KNOWN: [Known; 6] = [
     ("chrome", "Google Chrome", "chrome://extensions", &[("ProgramFiles", r"Google\Chrome\Application\chrome.exe"), ("ProgramFiles(x86)", r"Google\Chrome\Application\chrome.exe"), ("LOCALAPPDATA", r"Google\Chrome\Application\chrome.exe")]),
     ("edge", "Microsoft Edge", "edge://extensions", &[("ProgramFiles(x86)", r"Microsoft\Edge\Application\msedge.exe"), ("ProgramFiles", r"Microsoft\Edge\Application\msedge.exe")]),
     ("brave", "Brave", "brave://extensions", &[("ProgramFiles", r"BraveSoftware\Brave-Browser\Application\brave.exe"), ("LOCALAPPDATA", r"BraveSoftware\Brave-Browser\Application\brave.exe")]),
     ("opera", "Opera", "opera://extensions", &[("LOCALAPPDATA", r"Programs\Opera\opera.exe"), ("LOCALAPPDATA", r"Programs\Opera GX\opera.exe")]),
     ("vivaldi", "Vivaldi", "vivaldi://extensions", &[("LOCALAPPDATA", r"Vivaldi\Application\vivaldi.exe"), ("ProgramFiles", r"Vivaldi\Application\vivaldi.exe")]),
+    // Firefox loads an unsigned add-on as a temporary one, from about:debugging.
+    ("firefox", "Mozilla Firefox", "about:debugging#/runtime/this-firefox", &[("ProgramFiles", r"Mozilla Firefox\firefox.exe"), ("ProgramFiles(x86)", r"Mozilla Firefox\firefox.exe"), ("LOCALAPPDATA", r"Mozilla Firefox\firefox.exe")]),
 ];
 
 fn program(places: &[(&str, &str)]) -> Option<PathBuf> {
@@ -42,6 +44,15 @@ pub fn open_extensions_page(id: &str) -> Result<(), String> {
 /// The extension folder to choose in "Load unpacked": beside Kestrel when installed; in a
 /// development build, the repository's BrowserExtension folder.
 pub fn extension_folder() -> Option<PathBuf> {
+    folder_named("BrowserExtension")
+}
+
+/// Firefox's build of the extension (its own background script and add-on ID), made by the installer.
+pub fn firefox_extension_folder() -> Option<PathBuf> {
+    folder_named("BrowserExtension-Firefox")
+}
+
+fn folder_named(name: &str) -> Option<PathBuf> {
     let exe = std::env::current_exe().ok()?;
-    exe.ancestors().skip(1).map(|dir| dir.join("BrowserExtension")).find(|dir| dir.join("manifest.json").is_file())
+    exe.ancestors().skip(1).map(|dir| dir.join(name)).find(|dir| dir.join("manifest.json").is_file())
 }

@@ -10,6 +10,7 @@ pub(crate) fn scheduler(app: AppHandle) {
         loop {
             tokio::time::sleep(std::time::Duration::from_secs(20)).await;
             let manager = app.state::<Shared>().inner().clone();
+            manager.apply_speed_schedule();
             let (day, now) = system::local_time();
             let stamp = format!("{day}-{now}");
             for queue in manager.settings.read().queues.clone() {
@@ -53,7 +54,7 @@ pub(crate) fn clipboard_monitor(app: AppHandle) {
             let Ok(url) = url::Url::parse(&text) else { continue };
             let ext = std::path::Path::new(url.path()).extension().map(|e| e.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
             let wanted = !ext.is_empty() && settings.capture_extensions.split_whitespace().any(|e| e.trim_start_matches('.').eq_ignore_ascii_case(&ext));
-            if matches!(url.scheme(), "http" | "https") && wanted && !manager.has_url(&text) {
+            if matches!(url.scheme(), "http" | "https" | "ftp" | "ftps" | "sftp") && wanted && !manager.has_url(&text) {
                 let _ = offer(&app, PendingRequest { url: text, ..Default::default() }, true);
             }
         }

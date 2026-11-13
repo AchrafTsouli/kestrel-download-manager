@@ -34,7 +34,7 @@ pub enum Kind {
     Http,
     /// A video page fetched with yt-dlp; the selection is the quality (and clip) chosen.
     Video { selection: kestrel_media::Selection },
-    /// A torrent through aria2; the selection names its saved file list and the chosen files.
+    /// A torrent; the selection names its saved file list and the chosen files.
     Torrent { selection: kestrel_torrent::Selection },
 }
 
@@ -309,6 +309,39 @@ pub struct Settings {
     pub archive_target: u8,
     /// 0 = no proxy, 1 = Windows' proxy settings, 2 = the proxy below.
     pub proxy_mode: u8,
+    /// Night mode: between these times ("23:00" to "07:00") the speed limit is `night_limit`
+    /// (bytes per second, 0 = none) instead of `speed_limit`.
+    pub night_mode: bool,
+    pub night_start: String,
+    pub night_end: String,
+    pub night_limit: u64,
+    /// Passwords tried on protected archives, one per line.
+    pub archive_passwords: String,
+}
+
+impl Settings {
+    /// The speed limit for "HH:MM" now: the night one inside the night window, else the usual one.
+    pub fn speed_limit_at(&self, now: &str) -> u64 {
+        let (start, end) = (self.night_start.as_str(), self.night_end.as_str());
+        let valid = |t: &str| t.len() == 5 && t.as_bytes()[2] == b':';
+        if !self.night_mode || !valid(start) || !valid(end) || start == end {
+            return self.speed_limit;
+        }
+        // Text comparison works for "HH:MM"; a window through midnight wraps.
+        let inside = if start < end { now >= start && now < end } else { now >= start || now < end };
+        if inside { self.night_limit } else { self.speed_limit }
+    }
+    /// What an export holds: everything except passwords (logins, proxy) and this PC's own state.
+    pub fn for_export(&self) -> Settings {
+        let mut s = self.clone();
+        s.proxy_password.clear();
+        for login in &mut s.site_logins {
+            login.password.clear();
+        }
+        s.last_update_check_ms = 0;
+        s.extension_guide_shown = false;
+        s
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -339,7 +372,8 @@ impl Default for SiteLogin {
 
 impl SiteLogin {
     pub fn matches(&self, url: &url::Url) -> bool {
-        self.enabled && !(self.username.is_empty() && self.password.is_empty()) && url::Url::parse(self.origin.trim()).is_ok_and(|o| o.origin() == url.origin())
+        // Scheme, host and port: SFTP addresses have no web origin of their own.
+        self.enabled && !(self.username.is_empty() && self.password.is_empty()) && url::Url::parse(self.origin.trim()).is_ok_and(|o| o.scheme() == url.scheme() && o.host_str() == url.host_str() && o.port_or_known_default() == url.port_or_known_default())
     }
 }
 
@@ -361,11 +395,13 @@ pub struct Rule {
     pub connections: Option<usize>,
     /// Bytes per second; none = no limit of its own.
     pub speed_limit: Option<u64>,
+    /// Sent instead of the usual User-Agent to this site; empty = the usual one.
+    pub user_agent: String,
 }
 
 impl Default for Rule {
     fn default() -> Self {
-        Rule { name: "New rule".into(), enabled: true, domain: String::new(), extensions: String::new(), url_pattern: String::new(), folder: String::new(), category: String::new(), queue: String::new(), connections: None, speed_limit: None }
+        Rule { name: "New rule".into(), enabled: true, domain: String::new(), extensions: String::new(), url_pattern: String::new(), folder: String::new(), category: String::new(), queue: String::new(), connections: None, speed_limit: None, user_agent: String::new() }
     }
 }
 
@@ -453,6 +489,11 @@ impl Default for Settings {
             first_day: 1,
             archive_target: 0,
             proxy_mode: 2,
+            night_mode: false,
+            night_start: "23:00".into(),
+            night_end: "07:00".into(),
+            night_limit: 0,
+            archive_passwords: String::new(),
             delete_extracted_archives: false,
         }
     }
@@ -516,5 +557,32 @@ mod tests {
     fn scanner_arguments_keep_quoted_parts() {
         assert_eq!(crate::manager::split_arguments(r#"--scan "{file}" /quiet"#).unwrap(), ["--scan", "{file}", "/quiet"]);
         assert!(crate::manager::split_arguments(r#""unclosed"#).is_err());
+    }
+}
+
+#[cfg(test)]
+mod night_tests {
+    use super::*;
+
+    #[test]
+    fn night_mode_follows_the_clock_even_through_midnight() {
+        let s = Settings { speed_limit: 100, night_mode: true, night_start: "23:00".into(), night_end: "07:00".into(), night_limit: 0, ..Settings::default() };
+        assert_eq!(s.speed_limit_at("23:30"), 0);
+        assert_eq!(s.speed_limit_at("03:00"), 0);
+        assert_eq!(s.speed_limit_at("07:00"), 100);
+        assert_eq!(s.speed_limit_at("12:00"), 100);
+        let day = Settings { night_start: "09:00".into(), night_end: "17:00".into(), night_limit: 50, ..s.clone() };
+        assert_eq!(day.speed_limit_at("10:00"), 50);
+        assert_eq!(day.speed_limit_at("18:00"), 100);
+        assert_eq!(Settings { night_mode: false, ..s }.speed_limit_at("23:30"), 100);
+    }
+
+    #[test]
+    fn exports_hold_no_passwords() {
+        let mut s = Settings { proxy_password: "p".into(), ..Settings::default() };
+        s.site_logins.push(SiteLogin { origin: "https://x.test/".into(), username: "me".into(), password: "secret".into(), enabled: true });
+        let e = s.for_export();
+        assert!(e.proxy_password.is_empty() && e.site_logins[0].password.is_empty());
+        assert_eq!(e.site_logins[0].username, "me");
     }
 }

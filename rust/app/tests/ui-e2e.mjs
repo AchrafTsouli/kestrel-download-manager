@@ -13,6 +13,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 
 const RUST = resolve(import.meta.dirname, "../..");
 const EXE = join(RUST, "target", "release", "kestrel.exe");
@@ -91,6 +92,8 @@ const HELPERS = `if (!window.t) window.t = {
   tool: (label) => [...document.querySelectorAll("button.tool")].find((b) => b.textContent.trim().startsWith(label)),
   item: (text) => [...document.querySelectorAll(".context .menu-item")].find((b) => b.textContent.trim().startsWith(text)),
   select: (names) => names.forEach((name, i) => t.row(name).dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0, ctrlKey: i > 0 }))),
+  menuItem: (text) => [...document.querySelectorAll(".menubar .menu-item")].find((b) => b.textContent.trim().startsWith(text)),
+  menuTitle: (text) => [...document.querySelectorAll(".menubar .menu-title")].find((b) => b.textContent.trim() === text),
   menu: (name) => t.row(name).dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 200, clientY: 200 })),
 };
 `;
@@ -152,6 +155,70 @@ try {
     await until("both queued", `t.status("ui-two.bin") === "Queued" && t.status("ui-three.bin") === "Queued"`);
     await js(`t.tool("Start Qu").click(); true`);
     await until("both complete", `t.status("ui-two.bin") === "Complete" && t.status("ui-three.bin") === "Complete"`, 40);
+  });
+
+  await check("Checksum of a finished file matches its real SHA-256", async () => {
+    await js(`t.select(["ui-one.bin"]); t.menu("ui-one.bin"); true`);
+    await until("the row menu", `t.item("Checksum") !== undefined`);
+    await js(`t.item("Checksum").click(); true`);
+    const value = await until("the checksum", `(() => { const v = document.querySelector("#sumval")?.value ?? ""; return /^[0-9a-f]{64}$/.test(v) ? v : null; })()`, 30);
+    assert.equal(value, createHash("sha256").update(content(0, SIZE - 1)).digest("hex"));
+    await js(`(() => { const i = document.querySelector("#sumexp"); i.value = ${JSON.stringify("x")}; i.dispatchEvent(new Event("input", { bubbles: true })); })()`);
+    await until("a mismatch is shown", `document.body.textContent.includes("The checksums differ")`);
+    await js(`[...document.querySelectorAll(".dialog .btn")].find((b) => b.textContent.trim() === "Close").click(); true`);
+  });
+
+  await check("Statistics count the finished downloads", async () => {
+    await js(`t.menuTitle("View").click(); true`);
+    await until("the View menu", `t.menuItem("Statistics") !== undefined`);
+    await js(`t.menuItem("Statistics").click(); true`);
+    const text = await until("the statistics", `document.querySelector("#stats-title")?.closest(".dialog")?.textContent ?? null`);
+    assert.match(text, /3\s*finished/);
+    await js(`[...document.querySelectorAll(".dialog .btn")].find((b) => b.textContent.trim() === "Close").click(); true`);
+  });
+
+  await check("Rename with a pattern", async () => {
+    await js(`t.select(["ui-two.bin"]); t.menu("ui-two.bin"); true`);
+    await until("the row menu", `t.item("Rename with a pattern") !== undefined`);
+    await js(`t.item("Rename with a pattern").click(); true`);
+    await until("the dialog", `document.querySelector("#pattern") !== null`);
+    await js(`(() => { const i = document.querySelector("#pattern"); i.value = "{n}-{name}"; i.dispatchEvent(new Event("input", { bubbles: true })); })()`);
+    await until("the preview", `document.querySelector(".preview")?.textContent.includes("01-ui-two.bin")`);
+    await js(`document.querySelector("#pattern").closest("form").requestSubmit(); true`);
+    await until("the new name in the list", `t.row("01-ui-two.bin") !== undefined`);
+    assert.ok(existsSync(join(root, "downloads", "01-ui-two.bin")), "the file was renamed on disk");
+  });
+
+  await check("Refresh address continues from a new link", async () => {
+    await js(`t.tool("Add URL").click(); true`);
+    await until("the dialog", `document.querySelector("#address") !== null`);
+    await js(`(() => { const i = document.querySelector("#address"); i.value = ${JSON.stringify(url("ui-four.bin"))}; i.dispatchEvent(new Event("input", { bubbles: true })); document.querySelector("form.add-dialog").requestSubmit(); })()`);
+    await until("running", `(() => { const s = t.status("ui-four.bin"); return s && /%$/.test(s) && parseFloat(s) > 0; })()`);
+    await js(`t.select(["ui-four.bin"]); true`);
+    await until("Stop is enabled", `!t.tool("Stop").disabled`);
+    await js(`t.tool("Stop").click(); true`);
+    await until("paused", `t.status("ui-four.bin") === "Paused"`);
+    await js(`t.menu("ui-four.bin"); true`);
+    await until("the row menu", `t.item("Refresh address") !== undefined`);
+    await js(`t.item("Refresh address").click(); true`);
+    await until("the dialog", `document.querySelector("#newurl") !== null`);
+    await js(`(() => { const i = document.querySelector("#newurl"); i.value = ${JSON.stringify(url("mirror/ui-four.bin"))}; i.dispatchEvent(new Event("input", { bubbles: true })); i.closest("form").requestSubmit(); })()`);
+    await until("the dialog closes", `document.querySelector("#newurl") === null`, 30);
+    await js(`t.select(["ui-four.bin"]); t.tool("Resume").click(); true`);
+    await until("complete", `t.status("ui-four.bin") === "Complete"`, 30);
+    assert.ok(readFileSync(join(root, "downloads", "ui-four.bin")).equals(content(0, SIZE - 1)), "the bytes on disk are right");
+  });
+
+  await check("The interface switches to German", async () => {
+    await js(`(async () => { const s = await window.__TAURI_INTERNALS__.invoke("get_settings"); await window.__TAURI_INTERNALS__.invoke("save_settings", { settings: { ...s, language: "de" } }); return true; })()`);
+    await until("German toolbar", `t.tool("URL hinzufügen") !== undefined`);
+    await js(`(async () => { const s = await window.__TAURI_INTERNALS__.invoke("get_settings"); await window.__TAURI_INTERNALS__.invoke("save_settings", { settings: { ...s, language: "en" } }); return true; })()`);
+    await until("English again", `t.tool("Add URL") !== undefined`);
+  });
+
+  await check("Markup parsed the way the browser extension's video panel builds it", async () => {
+    const parsed = await js(`(() => { const d = new DOMParser().parseFromString('<style>.a{}</style><div class="panel"><svg viewBox="0 0 24 24"><path d="M1 1"/></svg></div>', "text/html"); const nodes = [...d.head.childNodes, ...d.body.childNodes]; const host = document.createElement("div"); const root = host.attachShadow({ mode: "open" }); root.append(...nodes); return [...root.childNodes].map((n) => n.nodeName).join(",") + "|" + root.querySelector("svg").namespaceURI; })()`);
+    assert.equal(parsed, "STYLE,DIV|http://www.w3.org/2000/svg");
   });
 
   await check("Delete removes the row", async () => {

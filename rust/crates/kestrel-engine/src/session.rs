@@ -64,6 +64,14 @@ fn clean(value: &str) -> bool {
     !value.chars().any(|c| c.is_control())
 }
 
+/// `scheme://host[:port]/` for any address Kestrel downloads from.
+pub fn origin_of(url: &Url) -> String {
+    match url.port() {
+        Some(port) => format!("{}://{}:{port}/", url.scheme(), url.host_str().unwrap_or_default()),
+        None => format!("{}://{}/", url.scheme(), url.host_str().unwrap_or_default()),
+    }
+}
+
 pub fn domain_matches(host: &str, domain: &str, host_only: bool) -> bool {
     let domain = domain.trim_start_matches('.').to_ascii_lowercase();
     let host = host.to_ascii_lowercase();
@@ -76,14 +84,16 @@ fn path_matches(path: &str, cookie_path: &str) -> bool {
 
 impl Session {
     pub fn for_url(url: &Url) -> Session {
-        Session { origin: format!("{}/", url.origin().ascii_serialization()), ..Default::default() }
+        Session { origin: origin_of(url), ..Default::default() }
     }
 
     /// Rejects sessions that do not belong to `url` or carry unsafe values.
     pub fn validate(&self, url: &Url) -> Result<()> {
         let bad = |what: &str| Err(Error::protocol(format!("Invalid download session: {what}.")));
         let Ok(origin) = Url::parse(&self.origin) else { return bad("origin") };
-        if !matches!(origin.scheme(), "http" | "https") || !origin.username().is_empty() || origin.path() != "/" || origin.query().is_some() || origin.origin() != url.origin() {
+        // Compared by scheme, host and port: SFTP addresses have no web origin of their own.
+        let same = origin.scheme() == url.scheme() && origin.host_str() == url.host_str() && origin.port_or_known_default() == url.port_or_known_default();
+        if !matches!(origin.scheme(), "http" | "https" | "ftp" | "ftps" | "sftp") || !origin.username().is_empty() || origin.path() != "/" || origin.query().is_some() || !same {
             return bad("the origin must match the download address");
         }
         if self.cookies.len() > 200 || self.cookies.iter().map(|c| c.name.len() + c.value.len()).sum::<usize>() > 24_000 {

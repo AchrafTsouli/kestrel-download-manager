@@ -8,6 +8,7 @@
   type Browser = { id: string; name: string; page: string };
   let browsers: Browser[] = $state([]);
   let folder: string | null = $state(null);
+  let firefoxManifest: string | null = $state(null);
   let chosen = $state("");
   let note = $state("");
   let error = $state("");
@@ -15,9 +16,10 @@
 
   onMount(async () => {
     call<Settings>("get_settings").then((s) => applyTheme(s.theme));
-    const setup = await call<{ browsers: Browser[]; folder: string | null }>("extension_setup");
+    const setup = await call<{ browsers: Browser[]; folder: string | null; firefoxManifest: string | null }>("extension_setup");
     browsers = setup.browsers;
     folder = setup.folder;
+    firefoxManifest = setup.firefoxManifest;
     chosen = browsers[0]?.id ?? "";
   });
   const browser = $derived(browsers.find((b) => b.id === chosen));
@@ -45,8 +47,34 @@
     <p class="intro">The Kestrel extension sends your browser's downloads and videos to Kestrel. Until it is in the browser stores, add it once by hand: it takes a minute.</p>
 
     {#if browsers.length === 0}
-      <p class="error-text">No Chrome, Edge, Brave, Opera or Vivaldi was found on this computer.</p>
+      <p class="error-text">No Chrome, Edge, Brave, Opera, Vivaldi or Firefox was found on this computer.</p>
     {:else}
+      {#if chosen === "firefox"}
+      <ol class="steps">
+        <li>
+          <div class="step-title">Open Firefox's add-on debugging page</div>
+          <div class="row">
+            <select class="input" bind:value={chosen} aria-label="Browser">{#each browsers as b}<option value={b.id}>{b.name}</option>{/each}</select>
+            <button class="btn primary" onclick={openPage}>Open the page</button>
+          </div>
+          {#if browser}<div class="muted small">Or type <code>{browser.page}</code> in the address bar. <button class="link" onclick={() => copy(browser!.page, "The address")}>Copy</button></div>{/if}
+        </li>
+        <li>
+          <div class="step-title">Click "Load Temporary Add-on…" and choose this file</div>
+          {#if firefoxManifest}
+            <div class="row"><input class="input" readonly value={firefoxManifest} aria-label="Firefox manifest" /><button class="btn" onclick={() => copy(firefoxManifest!, "The file path")}>Copy path</button></div>
+            <div class="muted small">In the file window, paste the path in the file name box and press Enter.</div>
+          {:else}
+            <p class="error-text">The Firefox build of the extension was not found next to Kestrel. Reinstall Kestrel to restore it.</p>
+          {/if}
+        </li>
+        <li>
+          <div class="step-title">Check the connection</div>
+          <div class="row"><button class="btn" onclick={check}>Connect Firefox to Kestrel</button></div>
+        </li>
+      </ol>
+      <p class="note">Firefox keeps a temporary add-on until it closes; add it again after restarting Firefox. A permanent add-on comes with Kestrel's listing on addons.mozilla.org.</p>
+      {:else}
       <ol class="steps">
         <li>
           <div class="step-title">Open the extensions page</div>
@@ -75,8 +103,8 @@
           <div class="row"><button class="btn" onclick={check}>Check the connection</button></div>
         </li>
       </ol>
+      {/if}
     {/if}
-    <p class="muted small firefox">Firefox only accepts extensions signed by Mozilla; the Firefox version will come with the store release.</p>
     {#if note}<p class="note">{note}</p>{/if}
     {#if error}<p class="error-text">{error}</p>{/if}
   </div>
@@ -94,5 +122,4 @@
   .small { font-size: 11px; margin-top: 4px; }
   code { font-family: Consolas, monospace; background: var(--raised); padding: 0 4px; border-radius: 3px; }
   .link { border: 0; background: none; padding: 0; color: var(--accent); cursor: pointer; font: inherit; text-decoration: underline; }
-  .firefox { margin: 0; }
 </style>

@@ -32,7 +32,7 @@ if (!$SkipBuild) {
 
 # The video tools are kept out of git; restore them (checked against video-tools/sources.json).
 $tools = Join-Path $root 'video-tools'
-if (@('yt-dlp.exe','ffmpeg.exe','ffprobe.exe','qjs.exe','aria2c.exe') | Where-Object { !(Test-Path -LiteralPath (Join-Path $tools $_)) }) {
+if (@('yt-dlp.exe','ffmpeg.exe','ffprobe.exe','qjs.exe') | Where-Object { !(Test-Path -LiteralPath (Join-Path $tools $_)) }) {
     & (Join-Path $PSScriptRoot 'Get-VideoTools.ps1')
 }
 
@@ -42,7 +42,18 @@ Copy-Item -LiteralPath (Join-Path $release 'kestrel.exe') -Destination (Join-Pat
 Copy-Item -LiteralPath (Join-Path $release 'kestrel-nmhost.exe'), (Join-Path $release 'kestrel-cli.exe') -Destination $stage
 Get-ChildItem -LiteralPath (Join-Path $root 'BrowserExtension') -File | Where-Object { $_.Name -ne 'package.json' -and $_.Name -notlike '*.test.js' } |
     Copy-Item -Destination (Join-Path $stage 'BrowserExtension')
-Get-ChildItem -LiteralPath $tools -File | Where-Object { $_.Extension -in @('.exe','.dll','.txt','.json') -and $_.Name -notin @('node.exe','NODE-LICENSE.txt') } |
+# Firefox's build: background script instead of a service worker, its own add-on ID, no "split" mode
+# (the same changes as scripts/Package-Extension.ps1 makes for addons.mozilla.org).
+$firefox = Join-Path $stage 'BrowserExtension-Firefox'
+Copy-Item -LiteralPath (Join-Path $stage 'BrowserExtension') -Destination $firefox -Recurse
+$fm = Get-Content -LiteralPath (Join-Path $firefox 'manifest.json') -Raw | ConvertFrom-Json
+$fm.PSObject.Properties.Remove('key')
+$fm.background = [pscustomobject]@{ scripts = @('background.js'); type = 'module' }
+$fm.incognito = 'spanning'
+$fm | Add-Member -NotePropertyName browser_specific_settings -NotePropertyValue ([pscustomobject]@{ gecko = [pscustomobject]@{ id = 'kestrel@achraftsouli.github.io'; strict_min_version = '128.0' } })
+foreach ($script in $fm.content_scripts) { $script.PSObject.Properties.Remove('match_origin_as_fallback') }
+[IO.File]::WriteAllText((Join-Path $firefox 'manifest.json'), ($fm | ConvertTo-Json -Depth 10), (New-Object Text.UTF8Encoding($false)))
+Get-ChildItem -LiteralPath $tools -File | Where-Object { $_.Extension -in @('.exe','.dll','.txt','.json') -and $_.Name -notin @('node.exe','NODE-LICENSE.txt','aria2c.exe') -and $_.Name -notlike 'aria2*' } |
     Copy-Item -Destination (Join-Path $stage 'video-tools')
 Copy-Item -LiteralPath (Join-Path $rust 'KESTREL_Icon_Pack/app/windows/kestrel.ico') -Destination (Join-Path $stage 'app.ico')
 Copy-Item -LiteralPath (Join-Path $rust 'KESTREL_Icon_Pack/app/png/kestrel-256.png') -Destination (Join-Path $stage 'app-icon.png')
@@ -64,7 +75,7 @@ function Sign-Files([string[]]$Paths) {
 Sign-Files @((Join-Path $stage 'Kestrel.exe'), (Join-Path $stage 'kestrel-nmhost.exe'), (Join-Path $stage 'kestrel-cli.exe'))
 if (!$signThumbprint) { Write-Output 'Not signed (set KESTREL_SIGN_THUMBPRINT to sign).' }
 
-foreach ($required in @('Kestrel.exe','kestrel-nmhost.exe','kestrel-cli.exe','BrowserExtension/manifest.json','video-tools/yt-dlp.exe','video-tools/ffmpeg.exe','video-tools/ffprobe.exe','video-tools/qjs.exe','video-tools/aria2c.exe','video-tools/sources.json','app.ico')) {
+foreach ($required in @('Kestrel.exe','kestrel-nmhost.exe','kestrel-cli.exe','BrowserExtension/manifest.json','BrowserExtension-Firefox/manifest.json','video-tools/yt-dlp.exe','video-tools/ffmpeg.exe','video-tools/ffprobe.exe','video-tools/qjs.exe','video-tools/sources.json','app.ico')) {
     if (!(Test-Path -LiteralPath (Join-Path $stage $required))) { throw "Incomplete payload: $required" }
 }
 

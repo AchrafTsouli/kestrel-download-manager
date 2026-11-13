@@ -18,6 +18,9 @@
   let powerKind: AfterQueue = $state("shutdown");
   let exitWhenDone = $state(false);
   const win = getCurrentWindow();
+  // Speed over the last minute, one sample a second.
+  let history: number[] = $state([]);
+  const SAMPLES = 60;
 
   onMount(() => {
     call<Settings>("get_settings").then((s) => { settings = s; applyTheme(s.theme); });
@@ -32,7 +35,16 @@
       listen<string[]>("removed", ({ payload }) => { if (payload.includes(id)) win.close(); }),
       listen<Settings>("settings", ({ payload }) => (settings = payload)),
     ];
-    return () => subs.forEach((s) => s.then((f) => f()));
+    const sampler = setInterval(() => { if (d) history = [...history.slice(-(SAMPLES - 1)), d.status === "Downloading" || d.status === "Connecting" ? d.bytesPerSecond : 0]; }, 1000);
+    return () => { clearInterval(sampler); subs.forEach((s) => s.then((f) => f())); };
+  });
+  const peak = $derived(Math.max(1, ...history));
+  const graph = $derived.by(() => {
+    if (history.length < 2) return { line: "", area: "" };
+    const x = (i: number) => ((i + SAMPLES - history.length) / (SAMPLES - 1)) * 100;
+    const y = (v: number) => 38 - (v / peak) * 34;
+    const points = history.map((v, i) => `${x(i).toFixed(2)},${y(v).toFixed(2)}`);
+    return { line: points.join(" "), area: `${x(0).toFixed(2)},40 ${points.join(" ")} 100,40` };
   });
   const title = $derived(d ? `${Math.floor(percent(d))}% ${d.name}` : "");
   $effect(() => { if (title) win.setTitle(title); });
@@ -86,6 +98,12 @@
               {:else if d.kind === "torrent"}<dd class="good">Yes: a torrent continues where it stopped</dd>
               {:else}<dd class={d.resumable ? "good" : "warn"}>{d.total == null && !d.resumable ? "Unknown until the server answers" : d.resumable ? "Yes" : "No: this server does not allow resuming"}</dd>{/if}
             </dl>
+            {#if history.length > 1}
+              <div class="speed-graph" title="Speed over the last minute">
+                <svg viewBox="0 0 100 40" preserveAspectRatio="none" aria-hidden="true"><polygon points={graph.area} /><polyline points={graph.line} /></svg>
+                <span class="peak">{size(peak)}/s</span>
+              </div>
+            {/if}
           {:else if tab === "limiter"}
             <div class="pane">
               <div class="line"><span class="muted label">Transfer rate</span><b>{d.bytesPerSecond > 0 ? size(d.bytesPerSecond) + "/sec" : "0 KB/sec"}</b></div>
@@ -196,4 +214,9 @@
   .conn { display: grid; grid-template-columns: 40px 112px 1fr; gap: 8px; padding: 3px 8px; border-bottom: 1px solid color-mix(in srgb, var(--line) 50%, transparent); }
   .conn.head { color: var(--muted); background: var(--chrome); position: sticky; top: 0; }
   .bytes { text-align: end; font-size: 11px; font-variant-numeric: tabular-nums; }
+  .speed-graph { position: relative; height: 52px; margin-top: 6px; border: 1px solid var(--line); border-radius: 3px; background: var(--bg); overflow: hidden; }
+  .speed-graph svg { width: 100%; height: 100%; display: block; }
+  .speed-graph polygon { fill: color-mix(in srgb, var(--accent) 22%, transparent); }
+  .speed-graph polyline { fill: none; stroke: var(--accent); stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+  .speed-graph .peak { position: absolute; top: 2px; right: 6px; font-size: 10.5px; color: var(--muted); }
 </style>

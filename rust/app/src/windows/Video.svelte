@@ -30,6 +30,12 @@
   // Subtitles, in the language Windows uses (saved as files beside the video).
   let subsOn = $state(false);
   let subsLangs = $state((navigator.language || "en").split("-")[0].toLowerCase());
+  // Audio track language (sites with dubbed tracks), SponsorBlock, chapters.
+  let audioLang = $state("");
+  let sponsorblock = $state(false);
+  let chapters = $state(false);
+  const audioLangError = $derived(audioLang.trim() && !/^[A-Za-z0-9][A-Za-z0-9-]{1,11}$/.test(audioLang.trim()) ? "Write the audio language like: en, fr or pt-BR." : "");
+  const extras = () => ({ audioLanguage: audioLang.trim() || null, sponsorblock: sponsorblock && !(found?.catalog && clipOn), chapters: chapters && !audio && !(found?.catalog && clipOn) });
 
   async function load() {
     loading = true; error = ""; found = null;
@@ -75,7 +81,7 @@
   const audio = $derived(found?.catalog ? !!selected?.audioOnly : preset === "audio");
   const wantSubs = $derived(subsOn && !audio && !(found?.catalog && clipOn) && subsLangs.trim().length > 0);
   const subsError = $derived(subsOn && !/^[A-Za-z0-9*._-]+(,[A-Za-z0-9*._-]+)*$/.test(subsLangs.trim()) ? "Write languages like: en, fr, pt-BR." : "");
-  const ready = $derived(!subsError && !busy && !loading && (found?.catalog ? !!selected && !clipError : chosen.size > 0));
+  const ready = $derived(!subsError && !audioLangError && !busy && !loading && (found?.catalog ? !!selected && !clipError : chosen.size > 0));
 
   function toggle(entry: string) {
     const next = new Set(chosen);
@@ -88,8 +94,8 @@
     busy = true; error = "";
     try {
       const choice = found?.catalog
-        ? { pendingId: id, formatId, clipStart: clipOn ? clipStart ?? 0 : null, clipEnd: clipOn ? clipEnd : null, clipExact: clipOn && exact, subtitles: wantSubs ? subsLangs.trim() : null, start }
-        : { pendingId: id, entries: [...chosen], maxHeight: /^\d+$/.test(preset) ? Number(preset) : null, audioOnly: preset === "audio", subfolder, subtitles: wantSubs ? subsLangs.trim() : null, start };
+        ? { pendingId: id, formatId, clipStart: clipOn ? clipStart ?? 0 : null, clipEnd: clipOn ? clipEnd : null, clipExact: clipOn && exact, subtitles: wantSubs ? subsLangs.trim() : null, ...extras(), start }
+        : { pendingId: id, entries: [...chosen], maxHeight: /^\d+$/.test(preset) ? Number(preset) : null, audioOnly: preset === "audio", subfolder, subtitles: wantSubs ? subsLangs.trim() : null, ...extras(), start };
       await call("confirm_video", { choice });
       win.close();
     } catch (e) { error = String(e); busy = false; }
@@ -105,6 +111,16 @@
     <span class="muted">{found?.catalog && clipOn && subsOn ? "not with a part of the video" : "saved beside the video, e.g. en, fr"}</span>
   </div>
   {#if subsError}<p class="error-text">{subsError}</p>{/if}
+  <div class="row subs">
+    <label for="alang">Audio language</label>
+    <input id="alang" class="input langs" bind:value={audioLang} placeholder="site's default" spellcheck="false" />
+    <span class="muted">for videos with several audio tracks, e.g. en, fr</span>
+  </div>
+  {#if audioLangError}<p class="error-text">{audioLangError}</p>{/if}
+  <div class="row subs">
+    <label class="check" title="Uses SponsorBlock's community data (sponsor.ajay.app)"><input type="checkbox" bind:checked={sponsorblock} disabled={!!(found?.catalog && clipOn)} /> Cut sponsor segments (SponsorBlock)</label>
+    <label class="check"><input type="checkbox" bind:checked={chapters} disabled={audio || !!(found?.catalog && clipOn)} /> Keep chapters</label>
+  </div>
 {/snippet}
 
 <div class="win">

@@ -1,12 +1,13 @@
 [package]
 name = "kestrel-torrent"
-description = "Magnet links and .torrent files through aria2 as a child process"
+description = "Magnet links and .torrent files, downloaded in-process by librqbit"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 publish = false
 
 [dependencies]
+url.workspace = true
 parking_lot.workspace = true
 kestrel-engine.workspace = true
 tokio = { workspace = true, features = ["process"] }
@@ -16,6 +17,7 @@ serde.workspace = true
 serde_json.workspace = true
 sha1.workspace = true
 getrandom.workspace = true
+librqbit = { version = "9.1.0", default-features = false, features = ["rust-tls"] }
 
 [dev-dependencies]
 tokio.workspace = true

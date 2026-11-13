@@ -4,14 +4,28 @@
 import { Window } from "@tauri-apps/api/window";
 import fr from "../locales/fr.json";
 import ar from "../locales/ar.json";
+import es from "../locales/es.json";
+import de from "../locales/de.json";
+import pt from "../locales/pt.json";
+import tr from "../locales/tr.json";
+import ru from "../locales/ru.json";
+import zh from "../locales/zh.json";
+import id from "../locales/id.json";
 
 export const languages: { code: string; name: string }[] = [
   { code: "auto", name: "Automatic (Windows language)" },
   { code: "en", name: "English" },
   { code: "fr", name: "Français" },
+  { code: "es", name: "Español" },
+  { code: "de", name: "Deutsch" },
+  { code: "pt", name: "Português (Brasil)" },
+  { code: "tr", name: "Türkçe" },
+  { code: "ru", name: "Русский" },
+  { code: "zh", name: "简体中文" },
+  { code: "id", name: "Bahasa Indonesia" },
   { code: "ar", name: "العربية" },
 ];
-const catalogs: Record<string, Record<string, string>> = { fr, ar };
+const catalogs: Record<string, Record<string, string>> = { fr, ar, es, de, pt, tr, ru, zh, id };
 const RTL = new Set(["ar"]);
 const ATTRIBUTES = ["title", "placeholder", "aria-label"];
 
@@ -28,6 +42,11 @@ const attributes = new WeakMap<Element, Record<string, { english: string; shown:
 const UNITS: Record<string, Record<string, string>> = {
   fr: { B: "o", KB: "Ko", MB: "Mo", GB: "Go", bytes: "octets" },
   ar: { B: "ب", KB: "ك.ب", MB: "م.ب", GB: "ج.ب", bytes: "بايت" },
+  ru: { B: "Б", KB: "КБ", MB: "МБ", GB: "ГБ", bytes: "байт" },
+  de: { bytes: "Bytes" },
+  tr: { bytes: "bayt" },
+  id: { bytes: "bita" },
+  zh: { bytes: "字节" },
 };
 export function unit(name: string): string {
   return UNITS[current]?.[name] ?? name;

@@ -26,6 +26,11 @@
   let confirmDelete: string[] | null = $state(null);
   let deleteFiles = $state(false);
   let renaming: { id: string; name: string } | null = $state(null);
+  // Refresh address (an expired link), checksum, rename with a pattern, statistics.
+  let refreshing = $state<{ id: string; name: string; url: string; error: string; busy: boolean } | null>(null);
+  let summing = $state<{ id: string; name: string; algorithm: string; value: string; expected: string; busy: boolean; error: string } | null>(null);
+  let patterning = $state<{ ids: string[]; pattern: string; error: string } | null>(null);
+  let stats = $state(false);
   let about = $state(false);
   let shortcuts = $state(false);
   let submenu = $state<string | null>(null);
@@ -172,8 +177,8 @@
   });
 
   function keys(e: KeyboardEvent) {
-    const dialog = adding || confirmDelete || about || shortcuts || renaming || countdown;
-    if (dialog) { if (e.key === "Escape") { adding = false; confirmDelete = null; about = false; shortcuts = false; renaming = null; } return; }
+    const dialog = adding || confirmDelete || about || shortcuts || renaming || countdown || refreshing || summing || patterning || stats;
+    if (dialog) { if (e.key === "Escape") { adding = false; confirmDelete = null; about = false; shortcuts = false; renaming = null; refreshing = null; summing = null; patterning = null; stats = false; } return; }
     if (e.key === "f" && e.ctrlKey) { e.preventDefault(); findBox(); return; }
     if (e.key === "F3") { e.preventDefault(); findNext(); return; }
     if (e.ctrlKey && (e.key === "+" || e.key === "=" || e.key === "-" || e.key === "0")) { e.preventDefault(); zoom(e.key === "0" ? 0 : e.key === "-" ? -1 : 1); return; }
@@ -252,6 +257,75 @@
   async function deleteCompleted() { const removed = await call<string[]>("remove_completed"); message = `Removed ${removed.length} completed download${removed.length === 1 ? "" : "s"} from the list.`; menu = null; }
   async function openFile(d: Download) { try { await call("open_file", { id: d.id }); } catch (e) { message = String(e); } }
   async function showFolder(d: Download) { try { await call("show_in_folder", { id: d.id }); } catch (e) { message = String(e); } }
+  // ---- Refresh address, checksum, pattern rename, statistics
+  const canRefresh = (d?: Download) => !!d && d.kind === "file" && d.status !== "Completed" && !running(d.status);
+  function openRefresh(d: Download) { menu = null; context = null; refreshing = { id: d.id, name: d.name, url: d.url, error: "", busy: false }; }
+  async function doRefresh(e: SubmitEvent) {
+    e.preventDefault(); if (!refreshing) return;
+    refreshing.busy = true; refreshing.error = "";
+    try { await call("refresh_address", { id: refreshing.id, url: refreshing.url }); message = `New address for ${refreshing.name}. Resume it to continue.`; refreshing = null; }
+    catch (err) { if (refreshing) { refreshing.error = String(err); refreshing.busy = false; } }
+  }
+  function openChecksum(d: Download) { menu = null; context = null; summing = { id: d.id, name: d.name, algorithm: "sha256", value: "", expected: "", busy: false, error: "" }; computeChecksum(); }
+  async function computeChecksum() {
+    if (!summing) return;
+    const s = summing; s.busy = true; s.value = ""; s.error = "";
+    try { s.value = await call<string>("file_checksum", { id: s.id, algorithm: s.algorithm }); } catch (err) { s.error = String(err); }
+    s.busy = false;
+  }
+  const checksumVerdict = $derived(!summing || !summing.value || !summing.expected.trim() ? "" : summing.expected.trim().toLowerCase() === summing.value ? "match" : "differ");
+  function openPattern() { menu = null; context = null; const list = chosen.filter((d) => !running(d.status) && d.kind !== "torrent").map((d) => d.id); if (list.length) patterning = { ids: list, pattern: "{name}", error: "" }; }
+  async function doPattern(e: SubmitEvent) {
+    e.preventDefault(); if (!patterning) return;
+    const results = await call<({ Ok: string } | { Err: string })[]>("rename_with_pattern", { ids: patterning.ids, pattern: patterning.pattern });
+    const failed = results.filter((r) => "Err" in r) as { Err: string }[];
+    if (failed.length) { patterning.error = failed[0].Err; return; }
+    message = `Renamed ${results.length} download${results.length === 1 ? "" : "s"}.`; patterning = null;
+  }
+  const patternPreview = $derived(patterning ? downloads.filter((d) => patterning!.ids.includes(d.id)).slice(0, 3).map((d, i) => {
+    const dot = d.name.lastIndexOf("."); const stem = dot > 0 ? d.name.slice(0, dot) : d.name; const ext = dot > 0 ? d.name.slice(dot + 1) : "";
+    const day = new Date(d.addedMs); const date = `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, "0")}-${String(day.getDate()).padStart(2, "0")}`;
+    let site = ""; try { site = new URL(d.url).hostname.replace(/^www\./, ""); } catch {}
+    const width = Math.max(2, String(patterning!.ids.length).length);
+    let out = patterning!.pattern.replaceAll("{name}", stem).replaceAll("{n}", String(i + 1).padStart(width, "0")).replaceAll("{date}", date).replaceAll("{site}", site).replaceAll("{ext}", ext);
+    if (!patterning!.pattern.includes("{ext}") && ext) out += "." + ext;
+    return out;
+  }) : []);
+  // Statistics: what finished, per day (last 14 days) and per month (last 12 months).
+  const statistics = $derived.by(() => {
+    if (!stats) return null;
+    const done = downloads.filter((d) => d.status === "Completed" && d.completedMs);
+    const dayKey = (t: number) => { const d = new Date(t); return `${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
+    const monthKey = (t: number) => { const d = new Date(t); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`; };
+    const days: { label: string; bytes: number; files: number }[] = [];
+    for (let i = 13; i >= 0; i--) days.push({ label: dayKey(Date.now() - i * 86400000), bytes: 0, files: 0 });
+    const months: { label: string; bytes: number; files: number }[] = [];
+    for (let i = 11; i >= 0; i--) { const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - i); months.push({ label: monthKey(d.getTime()), bytes: 0, files: 0 }); }
+    const from = Date.now() - 14 * 86400000;
+    for (const d of done) {
+      const bytes = d.total ?? d.written;
+      const day = d.completedMs! >= from ? days.find((x) => x.label === dayKey(d.completedMs!)) : undefined;
+      if (day) { day.bytes += bytes; day.files++; }
+      const month = months.find((x) => x.label === monthKey(d.completedMs!));
+      if (month) { month.bytes += bytes; month.files++; }
+    }
+    const total = done.reduce((s, d) => s + (d.total ?? d.written), 0);
+    return { days, months, total, files: done.length, dayMax: Math.max(1, ...days.map((x) => x.bytes)), monthMax: Math.max(1, ...months.map((x) => x.bytes)) };
+  });
+  // ---- Settings export and import (passwords are never written to the file)
+  async function exportSettings() {
+    menu = null;
+    const path = await saveFile({ title: "Export settings", defaultPath: "kestrel-settings.json", filters: [{ name: "Kestrel settings", extensions: ["json"] }] });
+    if (typeof path !== "string") return;
+    try { await call("export_settings", { path }); message = "Settings exported (without passwords)."; } catch (e) { message = String(e); }
+  }
+  async function importSettings() {
+    menu = null;
+    const path = await pickFile({ title: "Import settings", filters: [{ name: "Kestrel settings", extensions: ["json"] }] });
+    if (typeof path !== "string") return;
+    try { await call("import_settings", { path }); } catch (e) { message = String(e); }
+  }
+
   async function doRename(e: SubmitEvent) { e.preventDefault(); if (!renaming) return; try { await call("rename_download", renaming); renaming = null; } catch (err) { message = String(err); renaming = null; } }
   const showWindow = (name: string) => { call("show_window", { name }); menu = null; };
   async function toggleQueue(name: string) {
@@ -272,7 +346,7 @@
   type MenuItem = { label: string; run?: () => void; disabled?: () => boolean; check?: () => boolean; key?: string; sep?: boolean; sub?: () => MenuItem[] };
   const HOME = "https://github.com/AchrafTsouli/kestrel-download-manager";
   const web = (url: string) => { call("open_folder", { path: url }); menu = null; };
-  const linkPattern = /^(https?:\/\/|magnet:\?)\S+$/i;
+  const linkPattern = /^((https?|ftps?|sftp):\/\/|magnet:\?)\S+$/i;
   // Opens the batch window with these links already filled in (the window reads them once).
   function batchWith(links: string[]) {
     try { localStorage.setItem("kestrel.batch", links.join("\n")); } catch {}
@@ -344,10 +418,12 @@
       { label: "Export", sep: true, sub: () => [
         { label: "To IDM export file…", run: () => exportList(true) },
         { label: "To text file…", run: () => exportList(false) },
+        { label: "Settings…", sep: true, run: exportSettings },
       ] },
       { label: "Import", sub: () => [
         { label: "From IDM export file…", run: () => importList(true) },
         { label: "From text file…", run: () => importList(false) },
+        { label: "Settings…", sep: true, run: importSettings },
       ] },
       { label: "Exit", sep: true, run: () => call("exit_app") },
     ],
@@ -361,6 +437,9 @@
       { label: "Download now", run: resume, disabled: () => !canResume },
       { label: "Redownload", run: () => chosen[0] && call("redownload", { id: chosen[0].id }), disabled: () => chosen.length !== 1 },
       { label: "Rename", run: () => chosen[0] && (renaming = { id: chosen[0].id, name: chosen[0].name }), disabled: () => chosen.length !== 1 || running(chosen[0].status) },
+      { label: "Rename with a pattern…", run: openPattern, disabled: () => !chosen.some((d) => !running(d.status) && d.kind !== "torrent") },
+      { label: "Refresh address…", run: () => chosen[0] && openRefresh(chosen[0]), disabled: () => chosen.length !== 1 || !canRefresh(chosen[0]) },
+      { label: "Checksum…", run: () => chosen[0] && openChecksum(chosen[0]), disabled: () => chosen.length !== 1 || chosen[0].status !== "Completed" },
       { label: "Remove", key: "Del", sep: true, run: () => askDelete(ids()), disabled: () => selected.size === 0 },
       { label: "Remove with files", run: () => { const list = ids(); menu = null; if (list.length) { confirmDelete = list; deleteFiles = true; } }, disabled: () => selected.size === 0 },
     ],
@@ -393,6 +472,7 @@
         { label: `Normal (now ${settings?.interfaceSize ?? 100} %)`, key: "Ctrl+0", run: () => zoom(0) },
       ] },
       { label: "Language…", run: () => showWindow("options") },
+      { label: "Statistics…", sep: true, run: () => { stats = true; menu = null; } },
     ],
     Help: [
       { label: "Help contents", run: () => web(`${HOME}#readme`) },
@@ -566,6 +646,9 @@
     {/if}
     <div class="sep"></div>
     <button class="menu-item" disabled={chosen.length !== 1 || running(chosen[0].status)} onclick={() => { renaming = { id: chosen[0].id, name: chosen[0].name }; context = null; }}><span class="tick"></span>Rename</button>
+    <button class="menu-item" disabled={!chosen.some((d) => !running(d.status) && d.kind !== "torrent")} onclick={openPattern}><span class="tick"></span>Rename with a pattern…</button>
+    <button class="menu-item" disabled={chosen.length !== 1 || !canRefresh(chosen[0])} onclick={() => openRefresh(chosen[0])}><span class="tick"></span>Refresh address…</button>
+    <button class="menu-item" disabled={chosen.length !== 1 || chosen[0].status !== "Completed"} onclick={() => openChecksum(chosen[0])}><span class="tick"></span>Checksum…</button>
     <button class="menu-item" disabled={chosen.length !== 1} onclick={() => { call("redownload", { id: chosen[0].id }); context = null; }}><span class="tick"></span>Redownload</button>
     <button class="menu-item" onclick={() => { navigator.clipboard?.writeText(chosen.map((d) => d.url).join("\n")); context = null; message = "Address copied."; }}><span class="tick"></span>Copy address</button>
     <button class="menu-item danger" onclick={() => askDelete(ids())}><span class="tick"></span>Delete<span class="key">Del</span></button>
@@ -598,6 +681,77 @@
         </div>
       </div>
     </form>
+  </div>
+{/if}
+
+{#if refreshing}
+  <div class="scrim" role="presentation">
+    <form class="dialog" onsubmit={doRefresh} aria-labelledby="refresh-title">
+      <div class="dialog-title" id="refresh-title">Refresh address</div>
+      <div class="dialog-body">
+        <p class="muted">Has the link to <b>{refreshing.name}</b> expired? Open the page where you found it, copy the new download link and paste it here. Kestrel keeps what it already has when the new link gives the same file.</p>
+        <div class="field"><label for="newurl">New address</label>
+          <!-- svelte-ignore a11y_autofocus -->
+          <input id="newurl" bind:value={refreshing.url} autofocus spellcheck="false" onfocus={(e) => (e.currentTarget as HTMLInputElement).select()} /></div>
+        {#if refreshing.error}<p class="error" role="alert">{refreshing.error}</p>{/if}
+      </div>
+      <div class="dialog-actions"><button type="submit" class="btn primary" disabled={refreshing.busy || !refreshing.url.trim()}>{refreshing.busy ? "Checking…" : "Use this address"}</button><button type="button" class="btn" onclick={() => (refreshing = null)}>Cancel</button></div>
+    </form>
+  </div>
+{/if}
+
+{#if summing}
+  <div class="scrim" role="presentation">
+    <div class="dialog" role="dialog" aria-labelledby="sum-title">
+      <div class="dialog-title" id="sum-title">Checksum</div>
+      <div class="dialog-body">
+        <p class="muted">{summing.name}</p>
+        <div class="field"><label for="algo">Type</label>
+          <select id="algo" bind:value={summing.algorithm} onchange={computeChecksum}><option value="md5">MD5</option><option value="sha1">SHA-1</option><option value="sha256">SHA-256</option></select></div>
+        <div class="field"><label for="sumval">Checksum</label>
+          <div class="sumrow"><input id="sumval" class="mono" readonly value={summing.busy ? "Reading the file…" : summing.value} /><button class="btn" disabled={!summing.value} onclick={() => { navigator.clipboard?.writeText(summing!.value); message = "Checksum copied."; }}>Copy</button></div></div>
+        <div class="field"><label for="sumexp">Compare with</label>
+          <input id="sumexp" class="mono" bind:value={summing.expected} placeholder="Paste the checksum the site gives" spellcheck="false" /></div>
+        {#if checksumVerdict === "match"}<p class="good-text">✓ The checksums match: the file is exactly the published one.</p>{/if}
+        {#if checksumVerdict === "differ"}<p class="error" role="alert">✗ The checksums differ: the file is damaged or not the published one (or choose another type).</p>{/if}
+        {#if summing.error}<p class="error" role="alert">{summing.error}</p>{/if}
+      </div>
+      <div class="dialog-actions"><button class="btn" onclick={() => (summing = null)}>Close</button></div>
+    </div>
+  </div>
+{/if}
+
+{#if patterning}
+  <div class="scrim" role="presentation">
+    <form class="dialog" onsubmit={doPattern} aria-labelledby="pat-title">
+      <div class="dialog-title" id="pat-title">Rename with a pattern</div>
+      <div class="dialog-body">
+        <div class="field"><label for="pattern">Name pattern</label>
+          <!-- svelte-ignore a11y_autofocus -->
+          <input id="pattern" bind:value={patterning.pattern} autofocus spellcheck="false" /></div>
+        <p class="muted">{"{name}"} current name · {"{n}"} number · {"{date}"} day added · {"{site}"} site · {"{ext}"} extension (kept when left out)</p>
+        <div class="preview">{#each patternPreview as p}<div class="mono">{p}</div>{/each}{#if patterning.ids.length > 3}<div class="muted">…</div>{/if}</div>
+        {#if patterning.error}<p class="error" role="alert">{patterning.error}</p>{/if}
+      </div>
+      <div class="dialog-actions"><button type="submit" class="btn primary" disabled={!patterning.pattern.trim()}>Rename</button><button type="button" class="btn" onclick={() => (patterning = null)}>Cancel</button></div>
+    </form>
+  </div>
+{/if}
+
+{#if stats && statistics}
+  <div class="scrim" role="presentation" onmousedown={(e) => e.target === e.currentTarget && (stats = false)}>
+    <div class="dialog wide" role="dialog" aria-labelledby="stats-title">
+      <div class="dialog-title" id="stats-title">Statistics</div>
+      <div class="dialog-body">
+        <p><b>{statistics.files}</b> finished · <b>{size(statistics.total)}</b> in all</p>
+        <div class="chart-title">Last 14 days</div>
+        <div class="bars">{#each statistics.days as d}<div class="bar" title={`${d.label}: ${size(d.bytes)} · ${d.files}`}><div class="fill" style:height="{(d.bytes / statistics.dayMax) * 100}%"></div><span>{d.label.slice(3)}</span></div>{/each}</div>
+        <div class="chart-title">Last 12 months</div>
+        <div class="bars">{#each statistics.months as m}<div class="bar" title={`${m.label}: ${size(m.bytes)} · ${m.files}`}><div class="fill" style:height="{(m.bytes / statistics.monthMax) * 100}%"></div><span>{m.label.slice(5)}</span></div>{/each}</div>
+        <p class="muted">Counted from the downloads still in the list.</p>
+      </div>
+      <div class="dialog-actions"><button class="btn" onclick={() => (stats = false)}>Close</button></div>
+    </div>
   </div>
 {/if}
 
@@ -814,4 +968,18 @@
   .about { grid-template-columns: auto 1fr; align-items: center; gap: 14px; }
   .about img { border-radius: 10px; }
   .muted { color: var(--muted); }
+  .dialog.wide { width: min(640px, 94vw); }
+  .field { grid-template-columns: 96px 1fr; }
+  .field select { height: 28px; padding: 0 6px; border: 1px solid var(--line); border-radius: 4px; background: var(--bg); color: var(--text); font: inherit; }
+  .sumrow { display: flex; gap: 6px; min-width: 0; }
+  .sumrow input { flex: 1; min-width: 0; }
+  .mono { font-family: Consolas, "Cascadia Mono", monospace; font-size: 12px; }
+  .good-text { color: var(--good); }
+  .preview { display: grid; gap: 2px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 4px; background: var(--bg); overflow: hidden; }
+  .preview div { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .chart-title { color: var(--muted); font-size: 12px; margin-top: 4px; }
+  .bars { display: flex; align-items: flex-end; gap: 4px; height: 110px; padding: 6px; border: 1px solid var(--line); border-radius: 4px; background: var(--bg); }
+  .bar { flex: 1; height: 100%; display: flex; flex-direction: column; justify-content: flex-end; align-items: stretch; gap: 3px; min-width: 0; }
+  .bar .fill { background: var(--accent); border-radius: 2px 2px 0 0; min-height: 1px; }
+  .bar span { font-size: 10px; color: var(--muted); text-align: center; }
 </style>
