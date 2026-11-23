@@ -288,3 +288,27 @@ async fn idle_connections_finish_a_slow_part() {
     assert_eq!(std::fs::read(&job.destination).unwrap(), expected(size, 5));
     assert!(took < Duration::from_secs(8), "the slow part held the download for {took:?}");
 }
+
+/// Cloudflare in front of Azure Blob Storage (cdn.devolutions.net): the ETag is unquoted, and an ETag
+/// If-Range makes it send the whole file. The date is used instead, and every connection gets its part.
+#[tokio::test]
+async fn an_unquoted_etag_behind_a_cdn_still_downloads_in_parts() {
+    let server = LabServer::start().await.unwrap();
+    let engine = engine();
+    let mut job = job(&server, "cdn.bin", "size=6000000&seed=21&azure_etag=1&slow_us=300", 6);
+    let outcome = run(&engine, &mut job).await.unwrap();
+    assert!(matches!(outcome, Outcome::Completed { bytes: 6000000, .. }), "{outcome:?}");
+    assert_eq!(std::fs::read(&job.destination).unwrap(), expected(6000000, 21));
+    assert!(server.stats("cdn.bin").max_concurrent >= 3, "the parts were still downloaded in parallel");
+}
+
+/// A server that answers any If-Range with the whole file: asked again without it.
+#[tokio::test]
+async fn a_server_ignoring_if_range_is_asked_again_without_it() {
+    let server = LabServer::start().await.unwrap();
+    let engine = engine();
+    let mut job = job(&server, "noifrange.bin", "size=4000000&seed=22&ignore_if_range=1", 4);
+    let outcome = run(&engine, &mut job).await.unwrap();
+    assert!(matches!(outcome, Outcome::Completed { bytes: 4000000, .. }), "{outcome:?}");
+    assert_eq!(std::fs::read(&job.destination).unwrap(), expected(4000000, 22));
+}

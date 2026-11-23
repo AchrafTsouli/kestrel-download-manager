@@ -3606,7 +3606,7 @@ dependencies = [
 
 [[package]]
 name = "kestrel-app"
-version = "2.1.0"
+version = "2.1.1"
 dependencies = [
  "arboard",
  "base64 0.22.1",
@@ -3642,7 +3642,7 @@ dependencies = [
 
 [[package]]
 name = "kestrel-cli"
-version = "2.1.0"
+version = "2.1.1"
 dependencies = [
  "getrandom 0.2.17",
  "kestrel-ipc",
@@ -3652,7 +3652,7 @@ dependencies = [
 
 [[package]]
 name = "kestrel-engine"
-version = "2.1.0"
+version = "2.1.1"
 dependencies = [
  "base64 0.22.1",
  "bytes",
@@ -3680,7 +3680,7 @@ dependencies = [
 
 [[package]]
 name = "kestrel-ipc"
-version = "2.1.0"
+version = "2.1.1"
 dependencies = [
  "kestrel-engine",
  "serde",
@@ -3693,7 +3693,7 @@ dependencies = [
 
 [[package]]
 name = "kestrel-media"
-version = "2.1.0"
+version = "2.1.1"
 dependencies = [
  "kestrel-engine",
  "parking_lot",
@@ -3710,7 +3710,7 @@ dependencies = [
 
 [[package]]
 name = "kestrel-nmhost"
-version = "2.1.0"
+version = "2.1.1"
 dependencies = [
  "kestrel-ipc",
  "kestrel-store",
@@ -3722,7 +3722,7 @@ dependencies = [
 
 [[package]]
 name = "kestrel-store"
-version = "2.1.0"
+version = "2.1.1"
 dependencies = [
  "chacha20poly1305",
  "getrandom 0.2.17",
@@ -3736,7 +3736,7 @@ dependencies = [
 
 [[package]]
 name = "kestrel-torrent"
-version = "2.1.0"
+version = "2.1.1"
 dependencies = [
  "getrandom 0.2.17",
  "kestrel-engine",
@@ -3753,7 +3753,7 @@ dependencies = [
 
 [[package]]
 name = "kestrel-update"
-version = "2.1.0"
+version = "2.1.1"
 dependencies = [
  "base64 0.22.1",
  "p256 0.13.2",
@@ -3776,7 +3776,7 @@ dependencies = [
 
 [[package]]
 name = "labserver"
-version = "2.1.0"
+version = "2.1.1"
 dependencies = [
  "bytes",
  "futures-util",
@@ -5909,7 +5909,7 @@ checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
 
 [[package]]
 name = "release-signer"
-version = "2.1.0"
+version = "2.1.1"
 dependencies = [
  "aes-gcm 0.10.3",
  "base64 0.22.1",

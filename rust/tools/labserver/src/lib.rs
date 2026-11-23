@@ -13,6 +13,8 @@
 //! | `slow_us=N`    | waits N microseconds per 16 KiB chunk |
 //! | `lag_from=N`   | the first transfer that starts at byte N or later waits 200 ms per chunk (one slow connection, once per path) |
 //! | `html=1`       | answers with a web page instead of the file |
+//! | `azure_etag=1` | an unquoted ETag (`0x8D…`, as Azure Blob Storage sends) that `If-Range` cannot match, like Cloudflare in front of Azure: an ETag `If-Range` gets the whole file; a date one works |
+//! | `ignore_if_range=1` | any `If-Range` gets the whole file with `200` |
 //!
 //! [`LabServer::stats`] reports what each path saw, so tests can check how many connections the
 //! client really opened.
@@ -192,7 +194,14 @@ async fn handle(shared: Arc<Shared>, request: Request<hyper::body::Incoming>) ->
     let size = number("size", 1 << 20);
     let seed = number("seed", 1);
     let ranged = number("no_range", 0) == 0;
-    let range = if ranged { request.headers().get(header::RANGE).and_then(|v| parse_range(v, size)) } else { None };
+    let mut range = if ranged { request.headers().get(header::RANGE).and_then(|v| parse_range(v, size)) } else { None };
+    let azure = number("azure_etag", 0) == 1;
+    if let Some(validator) = request.headers().get(header::IF_RANGE).and_then(|v| v.to_str().ok()) {
+        let is_date = validator.ends_with("GMT");
+        if number("ignore_if_range", 0) == 1 || (azure && !is_date) {
+            range = None;
+        }
+    }
     let (start, end) = range.unwrap_or((0, size.saturating_sub(1)));
     let probe = range.is_some_and(|(s, e)| s == 0 && e == 0);
 
@@ -222,7 +231,7 @@ async fn handle(shared: Arc<Shared>, request: Request<hyper::body::Incoming>) ->
         .status(if range.is_some() { StatusCode::PARTIAL_CONTENT } else { StatusCode::OK })
         .header(header::CONTENT_LENGTH, length)
         .header(header::CONTENT_TYPE, "application/octet-stream")
-        .header(header::ETAG, format!("\"lab-{seed}-{size}\""))
+        .header(header::ETAG, if azure { format!("0x8D{seed:04X}{size:08X}") } else { format!("\"lab-{seed}-{size}\"") })
         .header(header::LAST_MODIFIED, "Wed, 21 Oct 2026 07:28:00 GMT");
     if ranged {
         builder = builder.header(header::ACCEPT_RANGES, "bytes");

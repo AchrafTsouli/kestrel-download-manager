@@ -615,8 +615,16 @@ impl Engine {
             (segment.position(), segment.end)
         };
         let ranged = job.resume.ranged;
-        let validator = job.resume.etag.clone().or_else(|| job.resume.last_modified.clone());
-        let response = self.send(job, None, ranged.then_some((position, end)), validator.as_deref()).await?;
+        // If-Range only with a proper entity tag ("…"); a bare one (Azure Blob's 0x8D…) never matches
+        // behind Cloudflare, which then sends the whole file, so the date is used instead.
+        let validator = job.resume.etag.clone().filter(|e| is_entity_tag(e)).or_else(|| job.resume.last_modified.clone());
+        let mut response = self.send(job, None, ranged.then_some((position, end)), validator.as_deref()).await?;
+        if ranged && validator.is_some() && response.status() == StatusCode::OK {
+            // The server did not take the validator and sent everything: asked again without it (the
+            // ETag is still compared below, so a file that really changed is still caught).
+            drop(response);
+            response = self.send(job, None, Some((position, end)), None).await?;
+        }
         Engine::check(&response)?;
         if ranged {
             let range = response.headers().get(header::CONTENT_RANGE).and_then(|v| v.to_str().ok()).and_then(content_range);
@@ -803,6 +811,12 @@ async fn read_some(mut response: reqwest::Response, max: usize) -> Vec<u8> {
     }
     body.truncate(max);
     body
+}
+
+/// A strong or weak entity tag as HTTP defines it: quoted (`"abc"`, `W/"abc"`).
+fn is_entity_tag(tag: &str) -> bool {
+    let tag = tag.strip_prefix("W/").unwrap_or(tag);
+    tag.len() >= 2 && tag.starts_with('"') && tag.ends_with('"')
 }
 
 /// The end of every download: checked against the expected SHA-256, renamed into place.
